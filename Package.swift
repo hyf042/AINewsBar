@@ -14,5 +14,10 @@ let package = Package(
             path: "Sources/AINewsBar",
             resources: [.process("Resources")]
         ),
+        .testTarget(
+            name: "AINewsBarTests",
+            dependencies: ["AINewsBar"],
+            path: "Tests/AINewsBarTests"
+        ),
     ]
 )

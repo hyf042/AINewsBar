@@ -2,77 +2,108 @@
 
 ## 项目背景
 
-2026-05-15，通过 `/grill-me` 技术访谈完整定义了 AINewsBar 的所有设计决策，随后从零完成代码骨架搭建。
+macOS 菜单栏 AI 资讯阅读器。通过 `/grill-me` 技术访谈定义设计决策，从零完成全部实现（截至 2026-05-20 所有功能已完成并可运行）。
+
+**位置：** `/Users/hyf042/Projects/AINewsBar`  
+**性质：** 个人工具，Swift Package Manager，macOS 14+，无 Xcode project 文件
+
+---
 
 ## 设计决策记录
 
-以下决策通过逐问逐答的方式与用户对齐，每个决策均有明确的推荐理由：
-
 | 维度 | 决策 | 理由 |
 |------|------|------|
-| 应用类型 | macOS 菜单栏应用（Menu Bar App） | RSS 需要后台刷新，WidgetKit 刷新策略不适合 |
+| 应用类型 | macOS 菜单栏（MenuBarExtra） | RSS 需后台刷新，WidgetKit 刷新策略不适合 |
 | 技术栈 | Swift + SwiftUI + macOS 14+ | 原生体验，MenuBarExtra 成熟，SwiftData 集成顺畅 |
-| 数据来源 | 内置精选源 + 用户自定义 RSS | 开箱即用 + 灵活扩展，降低使用门槛 |
+| 数据来源 | 内置精选源 + 用户自定义 RSS | 开箱即用 + 灵活扩展 |
 | UI 布局 | 混合 Feed 流（时间倒序） | 菜单栏弹窗空间有限，混合流最适合快速浏览 |
 | 刷新策略 | 后台每小时 + 打开时按需（超 30 分钟触发） | 兼顾实时性和资源效率 |
-| 已读状态 | 本地已读标记 + 菜单栏未读角标 | 非侵入式提示，避免频繁通知打扰 |
-| 文章点击 | 浏览器打开原文 + AI 一句话简介 | 符合用户预期，弹窗内嵌 WebView 拥挤 |
-| AI 摘要服务 | OpenAI GPT-4o mini | 质量高、价格低（每篇 < $0.001） |
-| 摘要触发 | 后台批量生成 + 本地缓存（URL 去重） | 打开即可看到摘要，不重复调用 API |
-| 数据持久化 | SwiftData（Feed/Article/AISummary 三张表） | 无历史包袱，@Query 与 SwiftUI 深度集成 |
-| 设置界面 | 独立 Settings 窗口（Cmd+,） | 符合 macOS 规范，内容多适合独立窗口 |
-| 分发方式 | 仅自用 | 无需公证和 App Store 审核 |
-| 开机自启 | 支持，默认关闭（SMAppService） | 尊重用户对登录项的控制权 |
-| 通知 | 仅菜单栏角标，无系统通知 | AI 资讯低紧迫性，避免打扰 |
+| 已读状态 | 本地标记 + @Query 过滤（isRead==false） | 非侵入式，点击后消失 |
+| 文章点击 | 浏览器打开原文 + AI 一句话简介 | 符合用户预期 |
+| AI 摘要服务 | 阿里云百炼 DashScope，模型 qwen-plus | 原设计 OpenAI，改为 DashScope 避免 Keychain ad-hoc 签名弹窗 |
+| 密钥存储 | UserDefaults（key: `com.ainewsbar.claude-api-key`） | 原设计 Keychain，ad-hoc 签名每次弹授权窗口，改为 UserDefaults |
+| 数据持久化 | SwiftData（Feed / Article 两张表） | @Query 与 SwiftUI 深度集成；AISummary 已合并到 Article 字段 |
+| 分发方式 | 仅自用，ad-hoc 签名 | 无需公证和 App Store 审核 |
 
-## 代码架构要点
+---
 
-### SwiftData 实体关系
-```
-Feed (1) ──< Article (1) ──< AISummary (0..1)
-```
+## 构建 & 运行
 
-### 刷新流程
-```
-App 启动 / 定时器触发
-  → RefreshService.refresh()
-    → RSSService.fetchArticles(from: feed)  ×N feeds (并发)
-    → 过滤已有 URL，插入新 Article
-    → 更新未读角标（NotificationCenter）
-    → OpenAIService.generateSummary() ×新文章 (串行，避免 rate limit)
-    → 缓存 AISummary
-```
-
-### 关键文件
-- `AINewsBarApp.swift` — `@main`，`MenuBarExtra` + `Settings` scene 定义
-- `RefreshService.swift` — 核心调度，`@MainActor ObservableObject`
-- `MenuBarView.swift` — 负责 seed 内置 Feed、configure RefreshService
-- `KeychainService.swift` — OpenAI Key 安全存储
-
-## 编译状态（2026-05-15）
-
-代码骨架已完成，**尚未编译验证**。
-
-阻塞原因：
-- 当前机器 macOS 13.0，未安装 Xcode
-- SwiftData 要求 macOS 14+，xcodegen 无法在 macOS 13 安装
-- Xcode 需从 App Store 手动安装（约 10GB）
-
-**待用户安装 Xcode 后**：
 ```bash
-open /Users/hyf042/Projects/AINewsBar   # Xcode 自动解析 FeedKit 依赖
-# Scheme: AINewsBar, Target: My Mac, Cmd+R
+cd /Users/hyf042/Projects/AINewsBar
+swift build
+pkill -x AINewsBar; sleep 1
+cp .build/debug/AINewsBar build/AINewsBar.app/Contents/MacOS/AINewsBar
+codesign --sign - --force build/AINewsBar.app
+build/AINewsBar.app/Contents/MacOS/AINewsBar &
 ```
 
-预期需要解决的编译问题：
-- FeedKit API 细节（`Feed.id`、`Feed.title` 等字段名待验证）
-- `@NSApplicationDelegateAdaptor` 与 `MenuBarExtra` 组合兼容性
-- SwiftData `#Predicate` 宏的具体语法
+> **不要用 `open` 命令**——在某些状态下会静默失败，进程不启动。  
+> **不要直接跑裸二进制**——MenuBarExtra 依赖 bundle 上下文和 Info.plist 的 `LSUIElement=true`。
 
-## 下一步计划
+---
 
-- [ ] 安装 Xcode，修复编译错误
-- [ ] 验证 FeedKit 抓取真实 RSS 数据
-- [ ] 测试 OpenAI API 摘要生成
-- [ ] 完善 UI 细节（空状态、错误提示、加载动画）
-- [ ] 添加文章搜索 / 过滤功能（可选）
+## 已实现功能（2026-05-20 全部完成）
+
+1. RSS 抓取，11 个内置源，每小时刷新，**只保留当天文章**，过期自动清理
+2. AI 单篇摘要：qwen-plus 生成一句话中文摘要（强制中文，无论原文语言）
+3. 今日 AI 资讯摘要：日报整体概述，可展开/收起，默认 5 行，max_tokens=300
+4. AI 今日推荐：每次刷新 AI 挑选 3 篇，附摘要，不受已读状态影响
+5. 摘要/推荐区**骨架占位**：未生成时显示灰条 + "生成中…" 提示
+6. 已读过滤：@Query 只显示 isRead==false，点击后消失
+7. 订阅源开关：设置页 Toggle，关闭时删除该源文章
+8. 去重：启动时自动去重，清理已移除订阅源存量
+9. Footer：最后更新精确时间 + 设置 + 退出
+
+---
+
+## 关键文件
+
+| 文件 | 说明 |
+|------|------|
+| `App/AINewsBarApp.swift` | ModelContainer + SwiftData 迁移失败自动重建 |
+| `App/AppDelegate.swift` | 隐藏 Dock 图标 |
+| `Services/RefreshService.swift` | 刷新/摘要/推荐调度，@MainActor |
+| `Services/ClaudeService.swift` | DashScope 调用（**类名 BailianService，勿与文件名混淆**） |
+| `Services/KeychainService.swift` | **实为 UserDefaults**，名称未改 |
+| `Services/BuiltInFeeds.swift` | 11 个内置源列表 |
+| `Views/MenuBarView.swift` | 主界面，含摘要区/推荐区 |
+| `Views/ArticleRowView.swift` | 用 `onTapGesture` 而非 `Button`（见踩坑 #1） |
+| `Utils/Log.swift` | 日志写到 `~/Downloads/AINewsBar-debug.log` |
+| `build/AINewsBar.app` | 打包好的 .app（ad-hoc 签名） |
+
+---
+
+## 内置订阅源（11 个）
+
+OpenAI News, Google DeepMind, Hugging Face Blog, TechCrunch AI, The Verge AI, Ars Technica AI, The Decoder, MIT Tech Review, VentureBeat AI, TLDR AI, 量子位
+
+---
+
+## 踩坑记录
+
+### 1. List 里的 Button 导致行渲染空白
+
+`ArticleRowView` 里**不能用 `Button`**，必须用 `VStack + .contentShape(Rectangle()) + .onTapGesture`。
+
+`MenuBarExtra(.window)` 样式下，`Button + .buttonStyle(.plain)` 放进 `List` 整行渲染空白（SwiftUI bug）。`LazyVStack+ScrollView` 也渲染空白，必须用 `List`。
+
+### 2. SwiftData 新增非可选字段导致迁移崩溃
+
+给 `@Model` 加新的非可选属性后，自动迁移会失败并 fatalError。需在 `AINewsBarApp.swift` 的 catch 块里删除旧数据库并重建。每次改 Model schema 后，先删 `~/Library/Application Support/default.store*` 再运行。
+
+### 3. `open` 命令静默失败
+
+用 `build/AINewsBar.app/Contents/MacOS/AINewsBar &` 直接启动，不用 `open build/AINewsBar.app`。
+
+### 4. 裸二进制运行 MenuBarExtra 图标不显示
+
+必须把二进制放进 .app bundle 再运行，不能直接跑 `.build/debug/AINewsBar`。
+
+### 5. SwiftData @Model 对象不能跨 actor 传递
+
+RSSService 抓完 RSS 后必须返回 `RawArticle: Sendable` 值类型，不能在 actor 里创建 `Article` 对象。跨边界使用会导致静默数据丢失或崩溃。
+
+### 6. @Query 的日期谓词在初始化时捕获，不会自动更新
+
+不能在 `@Query` 的 `#Predicate` 里用 `Date()` 做当天过滤。日期过滤放在 Service 层（RefreshService 插入时过滤 + 刷新时清理旧数据），@Query 只做 isRead 过滤。

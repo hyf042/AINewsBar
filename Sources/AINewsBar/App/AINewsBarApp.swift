@@ -6,9 +6,24 @@ struct AINewsBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     private let container: ModelContainer = {
-        let schema = Schema([Feed.self, Article.self, AISummary.self])
+        let schema = Schema([Feed.self, Article.self])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-        return try! ModelContainer(for: schema, configurations: config)
+        do {
+            let c = try ModelContainer(for: schema, configurations: config)
+            Log.write("ModelContainer created OK")
+            return c
+        } catch {
+            // 迁移失败时删除旧库重建（今日文章重新抓取即可）
+            Log.write("ModelContainer failed, resetting store: \(error)")
+            let base = URL.applicationSupportDirectory.appending(path: "default.store")
+            for suffix in ["", "-shm", "-wal"] {
+                let url = URL.applicationSupportDirectory.appending(path: "default.store\(suffix)")
+                try? FileManager.default.removeItem(at: url)
+            }
+            let c = try! ModelContainer(for: schema, configurations: config)
+            Log.write("ModelContainer recreated OK")
+            return c
+        }
     }()
 
     var body: some Scene {

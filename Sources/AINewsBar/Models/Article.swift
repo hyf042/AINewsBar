@@ -1,7 +1,9 @@
 import Foundation
+import SwiftData
 
-struct Article: Identifiable, Codable, Equatable {
-    let id: UUID
+@Model
+final class Article {
+    var id: UUID
     var title: String
     var url: String
     var content: String?

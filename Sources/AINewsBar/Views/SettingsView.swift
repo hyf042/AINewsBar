@@ -30,7 +30,7 @@ struct FeedsSettingsView: View {
             List {
                 Section("内置订阅源") {
                     ForEach(feeds.filter(\.isBuiltIn)) { feed in
-                        FeedRowView(feed: feed)
+                        BuiltInFeedRowView(feed: feed)
                     }
                 }
                 Section("自定义订阅源") {
@@ -73,6 +73,48 @@ struct FeedRowView: View {
                 .lineLimit(1)
         }
         .padding(.vertical, 2)
+    }
+}
+
+struct BuiltInFeedRowView: View {
+    @Bindable var feed: Feed
+    @Environment(\.modelContext) private var modelContext
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(feed.title)
+                    .font(.system(size: 13))
+                    .foregroundStyle(feed.isEnabled ? .primary : .secondary)
+                Text(feed.url)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Toggle("", isOn: $feed.isEnabled)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .onChange(of: feed.isEnabled) { _, enabled in
+                    handleToggle(enabled: enabled)
+                }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func handleToggle(enabled: Bool) {
+        let feedID = feed.id
+        if !enabled {
+            let articles = (try? modelContext.fetch(
+                FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
+            )) ?? []
+            articles.forEach { modelContext.delete($0) }
+        }
+        try? modelContext.save()
+        if enabled {
+            Task { await RefreshService.shared.refresh() }
+        }
     }
 }
 
@@ -123,7 +165,7 @@ struct APISettingsView: View {
 
     var body: some View {
         Form {
-            Section("OpenAI API Key") {
+            Section("阿里云百炼 API Key") {
                 HStack {
                     if isRevealed {
                         TextField("sk-...", text: $apiKey)
@@ -134,22 +176,22 @@ struct APISettingsView: View {
                         isRevealed.toggle()
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.accentColor)
+                    .foregroundStyle(Color.accentColor)
                 }
 
-                Text("用于生成文章 AI 摘要，Key 安全存储在 Keychain 中")
+                Text("用于生成文章 AI 摘要，前往 bailian.console.aliyun.com 获取")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 Button("保存") {
-                    KeychainService.shared.saveOpenAIKey(apiKey)
+                    KeychainService.shared.saveAPIKey(apiKey)
                 }
                 .buttonStyle(.borderedProminent)
             }
         }
         .formStyle(.grouped)
         .onAppear {
-            apiKey = KeychainService.shared.getOpenAIKey() ?? ""
+            apiKey = KeychainService.shared.getAPIKey() ?? ""
         }
     }
 }

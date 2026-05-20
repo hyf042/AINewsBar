@@ -4,6 +4,7 @@ import SwiftData
 @main
 struct AINewsBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var refreshService = RefreshService.shared
 
     private let container: ModelContainer = {
         let schema = Schema([Feed.self, Article.self])
@@ -22,6 +23,10 @@ struct AINewsBarApp: App {
             }
             let c = try! ModelContainer(for: schema, configurations: config)
             Log.write("ModelContainer recreated OK")
+            // 容灾去重：重建后理论上空库，此调用作为防御兜底（KISS 保留以便未来迁移场景）
+            Task { @MainActor in
+                BuiltInFeeds.deduplicateArticles(context: ModelContext(c))
+            }
             return c
         }
     }()
@@ -30,6 +35,7 @@ struct AINewsBarApp: App {
         MenuBarExtra {
             MenuBarView()
                 .modelContainer(container)
+                .environmentObject(refreshService)
         } label: {
             MenuBarLabel()
         }
@@ -38,6 +44,7 @@ struct AINewsBarApp: App {
         Settings {
             SettingsView()
                 .modelContainer(container)
+                .environmentObject(refreshService)
         }
     }
 }

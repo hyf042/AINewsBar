@@ -26,61 +26,27 @@ final class RecommendEngineTests: XCTestCase {
         return ArticleSnapshot(all: items)
     }
 
-    // MARK: - .auto trigger
+    // 决策已移至 RefreshService（由 RefreshDecisionTests 覆盖）；
+    // Engine 在此只测：执行 + "<3 → nil" 数据完整性保护 + AI 错误透传
 
-    func testAutoSkipsWhenDecisionNo() async throws {
-        let trigger: RecommendEngine.Trigger = .auto(
-            hasNewArticles: false, isEmpty: false,
-            currentCount: 5, lastCount: 5, deltaThreshold: 3
-        )
-        let outcome = try await engine.run(trigger: trigger, snapshot: snap(count: 5),
-                                            apiKey: "k", model: "m")
-        XCTAssertNil(outcome, "无新文章 + 增量未达阈值 → 不应调 AI")
-        XCTAssertEqual(ai.recommendCallCount, 0)
-    }
-
-    func testAutoRunsWhenHasNewArticles() async throws {
-        let trigger: RecommendEngine.Trigger = .auto(
-            hasNewArticles: true, isEmpty: false,
-            currentCount: 5, lastCount: 5, deltaThreshold: 3
-        )
-        let outcome = try await engine.run(trigger: trigger, snapshot: snap(count: 5),
+    func testRunsWhenEnoughArticles() async throws {
+        let outcome = try await engine.run(snapshot: snap(count: 5),
                                             apiKey: "k", model: "m")
         XCTAssertNotNil(outcome)
         XCTAssertEqual(ai.recommendCallCount, 1)
     }
 
-    func testAutoRunsWhenDeltaExceeded() async throws {
-        let trigger: RecommendEngine.Trigger = .auto(
-            hasNewArticles: false, isEmpty: false,
-            currentCount: 10, lastCount: 5, deltaThreshold: 3
-        )
-        let outcome = try await engine.run(trigger: trigger, snapshot: snap(count: 10),
-                                            apiKey: "k", model: "m")
-        XCTAssertNotNil(outcome)
-    }
-
-    // MARK: - .forced trigger
-
-    func testForcedSkipsDecisionGate() async throws {
-        // 即使 hasNewArticles=false, delta=0，forced 应直接执行
-        let outcome = try await engine.run(trigger: .forced, snapshot: snap(count: 5),
-                                            apiKey: "k", model: "m")
-        XCTAssertNotNil(outcome)
-        XCTAssertEqual(ai.recommendCallCount, 1)
-    }
-
-    func testForcedReturnsNilBelow3Articles() async throws {
-        let outcome = try await engine.run(trigger: .forced, snapshot: snap(count: 2),
+    func testReturnsNilBelow3Articles() async throws {
+        let outcome = try await engine.run(snapshot: snap(count: 2),
                                             apiKey: "k", model: "m")
         XCTAssertNil(outcome, "<3 篇文章不应调 AI")
         XCTAssertEqual(ai.recommendCallCount, 0)
     }
 
-    func testForcedPropagatesAIError() async {
+    func testPropagatesAIError() async {
         ai.recommendError = URLError(.timedOut)
         do {
-            _ = try await engine.run(trigger: .forced, snapshot: snap(count: 5),
+            _ = try await engine.run(snapshot: snap(count: 5),
                                       apiKey: "k", model: "m")
             XCTFail("应抛出错误")
         } catch {
@@ -90,7 +56,7 @@ final class RecommendEngineTests: XCTestCase {
 
     func testOutcomeCarriesSummarizedCount() async throws {
         let s = snap(count: 5, summarized: 3)
-        let outcome = try await engine.run(trigger: .forced, snapshot: s,
+        let outcome = try await engine.run(snapshot: s,
                                             apiKey: "k", model: "m")
         XCTAssertEqual(outcome?.articleCount, 3, "articleCount 应为有摘要的数量")
     }

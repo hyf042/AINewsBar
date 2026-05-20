@@ -9,9 +9,11 @@ protocol RSSFetching: Sendable {
 
 protocol AISummarizing: Sendable {
     func generateSummary(title: String, content: String?, apiKey: String, model: String) async throws -> String
-    func recommendArticles(_ articles: [(id: UUID, title: String, summary: String?)],
+    /// 入参 items 应包含全部候选；返回选中的 id 列表（保序）
+    func recommendArticles(_ items: [ArticleSnapshot.Item],
                             apiKey: String, model: String) async throws -> [UUID]
-    func generateDigest(articleSummaries: [(title: String, summary: String)],
+    /// 入参 items 应仅含已有摘要的条目（caller 负责过滤）；nil-summary 项实现侧防御性跳过
+    func generateDigest(items: [ArticleSnapshot.Item],
                          apiKey: String, model: String) async throws -> String
 }
 

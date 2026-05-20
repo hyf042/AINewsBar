@@ -12,24 +12,12 @@ struct ArticleSnapshot: Sendable {
 
     let all: [Item]
 
+    /// 仅含已生成摘要的条目（DigestEngine 使用）
     var summarized: [Item] {
         all.filter { $0.summary != nil }
     }
 
     var summarizedCount: Int { summarized.count }
-
-    /// DigestEngine 使用：(title, summary)，仅含已有摘要的条目
-    var summarizedPairs: [(title: String, summary: String)] {
-        all.compactMap { item in
-            guard let s = item.summary else { return nil }
-            return (title: item.title, summary: s)
-        }
-    }
-
-    /// RecommendEngine 使用：(id, title, summary?)，包含所有文章
-    var pickInputs: [(id: UUID, title: String, summary: String?)] {
-        all.map { ($0.id, $0.title, $0.summary) }
-    }
 
     @MainActor
     static func capture(from context: ModelContext) -> ArticleSnapshot {

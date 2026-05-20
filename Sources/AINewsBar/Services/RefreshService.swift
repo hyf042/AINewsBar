@@ -151,7 +151,7 @@ final class RefreshService: ObservableObject {
         defer { isRegeneratingRecommend = false }
 
         let snapshot = ArticleSnapshot.capture(from: context)
-        await runRecommend(trigger: .forced, snapshot: snapshot, apiKey: apiKey, model: model)
+        await runRecommend(snapshot: snapshot, apiKey: apiKey, model: model)
     }
 
     func forceRegenerateDigest() async {
@@ -161,7 +161,7 @@ final class RefreshService: ObservableObject {
         defer { isRegeneratingDigest = false }
 
         let snapshot = ArticleSnapshot.capture(from: context)
-        await runDigest(trigger: .forced, snapshot: snapshot, apiKey: apiKey, model: model)
+        await runDigest(snapshot: snapshot, apiKey: apiKey, model: model)
     }
 
     // MARK: - Private: persisted state
@@ -201,49 +201,47 @@ final class RefreshService: ObservableObject {
             coverage = result.completionRate >= coverageThreshold
         }
 
-        // 2. 推荐 + 日报：基于同一份 snapshot 触发
+        // 2. 推荐 + 日报：决策在此（单一职责），Engine 只负责执行
         let snapshot = ArticleSnapshot.capture(from: context)
         guard snapshot.summarizedCount >= 3 else { return }
 
-        await runRecommend(
-            trigger: .auto(
-                hasNewArticles: hasNewArticles,
-                isEmpty: recommendedArticleIDs.isEmpty,
-                currentCount: snapshot.summarizedCount,
-                lastCount: recommendArticleCount,
-                deltaThreshold: summaryDeltaThreshold
-            ),
-            snapshot: snapshot,
-            apiKey: apiKey,
-            model: model
-        )
+        if RefreshDecision.shouldRegenerateRecommend(
+            hasNewArticles: hasNewArticles,
+            isEmpty: recommendedArticleIDs.isEmpty,
+            currentCount: snapshot.summarizedCount,
+            lastCount: recommendArticleCount,
+            deltaThreshold: summaryDeltaThreshold
+        ) {
+            await runRecommend(snapshot: snapshot, apiKey: apiKey, model: model)
+        } else {
+            Log.write("[Recommend] skip — delta=\(snapshot.summarizedCount - recommendArticleCount), hasNew=\(hasNewArticles)")
+        }
 
-        await runDigest(
-            trigger: .auto(
-                hasNewArticles: hasNewArticles,
-                isPresent: dailyDigest != nil,
-                lastDate: lastDigestDate,
-                currentCount: snapshot.summarizedCount,
-                lastCount: digestArticleCount,
-                hasEnoughCoverage: coverage,
-                regenerateInterval: digestRegenerateInterval,
-                deltaThreshold: summaryDeltaThreshold
-            ),
-            snapshot: snapshot,
-            apiKey: apiKey,
-            model: model
-        )
+        if !coverage {
+            Log.write("[Digest] skip — coverage below threshold")
+        } else if RefreshDecision.shouldRegenerateDigest(
+            hasNewArticles: hasNewArticles,
+            isPresent: dailyDigest != nil,
+            lastDate: lastDigestDate,
+            currentCount: snapshot.summarizedCount,
+            lastCount: digestArticleCount,
+            regenerateInterval: digestRegenerateInterval,
+            deltaThreshold: summaryDeltaThreshold
+        ) {
+            await runDigest(snapshot: snapshot, apiKey: apiKey, model: model)
+        } else {
+            Log.write("[Digest] skip — delta=\(snapshot.summarizedCount - digestArticleCount), hasNew=\(hasNewArticles)")
+        }
     }
 
     private func runRecommend(
-        trigger: RecommendEngine.Trigger,
         snapshot: ArticleSnapshot,
         apiKey: String,
         model: String
     ) async {
         do {
             if let outcome = try await recommendEngine.run(
-                trigger: trigger, snapshot: snapshot, apiKey: apiKey, model: model
+                snapshot: snapshot, apiKey: apiKey, model: model
             ) {
                 commit(outcome)
             }
@@ -254,14 +252,13 @@ final class RefreshService: ObservableObject {
     }
 
     private func runDigest(
-        trigger: DigestEngine.Trigger,
         snapshot: ArticleSnapshot,
         apiKey: String,
         model: String
     ) async {
         do {
             if let outcome = try await digestEngine.run(
-                trigger: trigger, snapshot: snapshot, apiKey: apiKey, model: model
+                snapshot: snapshot, apiKey: apiKey, model: model
             ) {
                 commit(outcome)
             }

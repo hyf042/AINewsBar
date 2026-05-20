@@ -28,8 +28,8 @@ final class MockRSS: RSSFetching, @unchecked Sendable {
 
 final class MockAI: AISummarizing, @unchecked Sendable {
     var summaryProvider: (@Sendable (String, String?) -> String)?
-    var recommendProvider: (@Sendable ([(id: UUID, title: String, summary: String?)]) -> [UUID])?
-    var digestProvider: (@Sendable ([(title: String, summary: String)]) -> String)?
+    var recommendProvider: (@Sendable ([ArticleSnapshot.Item]) -> [UUID])?
+    var digestProvider: (@Sendable ([ArticleSnapshot.Item]) -> String)?
 
     // 错误注入
     var summaryError: Error?
@@ -47,17 +47,17 @@ final class MockAI: AISummarizing, @unchecked Sendable {
         return summaryProvider?(title, content) ?? "mock-summary-of-\(title)"
     }
 
-    func recommendArticles(_ articles: [(id: UUID, title: String, summary: String?)], apiKey: String, model: String) async throws -> [UUID] {
+    func recommendArticles(_ items: [ArticleSnapshot.Item], apiKey: String, model: String) async throws -> [UUID] {
         recommendCallCount += 1
         if let e = recommendError { throw e }
-        if let p = recommendProvider { return p(articles) }
-        return Array(articles.prefix(3).map(\.id))
+        if let p = recommendProvider { return p(items) }
+        return Array(items.prefix(3).map(\.id))
     }
 
-    func generateDigest(articleSummaries: [(title: String, summary: String)], apiKey: String, model: String) async throws -> String {
+    func generateDigest(items: [ArticleSnapshot.Item], apiKey: String, model: String) async throws -> String {
         digestCallCount += 1
         if let e = digestError { throw e }
-        return digestProvider?(articleSummaries) ?? "mock-digest-\(articleSummaries.count)"
+        return digestProvider?(items) ?? "mock-digest-\(items.count)"
     }
 }
 

@@ -96,10 +96,12 @@ final class BailianServiceTests: XCTestCase {
     }
 
     func testRecommendPromptIncludesNumberedList() {
-        let articles: [(id: UUID, title: String, summary: String?)] = [
-            (UUID(), "A", "sa"), (UUID(), "B", nil), (UUID(), "C", "sc")
+        let items: [ArticleSnapshot.Item] = [
+            .init(id: UUID(), title: "A", summary: "sa"),
+            .init(id: UUID(), title: "B", summary: nil),
+            .init(id: UUID(), title: "C", summary: "sc")
         ]
-        let prompt = BailianService.makeRecommendPrompt(articles: articles)
+        let prompt = BailianService.makeRecommendPrompt(items: items)
         XCTAssertTrue(prompt.contains("1. A"))
         XCTAssertTrue(prompt.contains("2. B"))
         XCTAssertTrue(prompt.contains("3. C"))
@@ -107,28 +109,44 @@ final class BailianServiceTests: XCTestCase {
     }
 
     func testRecommendPromptCapsAt50() {
-        let articles = (0..<100).map { (UUID(), "T\($0)", "s\($0)" as String?) }
-            .map { (id: $0.0, title: $0.1, summary: $0.2) }
-        let prompt = BailianService.makeRecommendPrompt(articles: articles)
+        let items = (0..<100).map { i in
+            ArticleSnapshot.Item(id: UUID(), title: "T\(i)", summary: "s\(i)")
+        }
+        let prompt = BailianService.makeRecommendPrompt(items: items)
         XCTAssertTrue(prompt.contains("50. T49"))
         XCTAssertFalse(prompt.contains("51. T50"), "超过 50 的应被截断")
     }
 
     func testDigestPromptIncludesEntries() {
-        let summaries = [
-            (title: "A", summary: "sa"),
-            (title: "B", summary: "sb")
+        let items: [ArticleSnapshot.Item] = [
+            .init(id: UUID(), title: "A", summary: "sa"),
+            .init(id: UUID(), title: "B", summary: "sb")
         ]
-        let prompt = BailianService.makeDigestPrompt(summaries: summaries)
+        let prompt = BailianService.makeDigestPrompt(items: items)
         XCTAssertTrue(prompt.contains("A｜sa"))
         XCTAssertTrue(prompt.contains("B｜sb"))
         XCTAssertTrue(prompt.contains("中文"))
     }
 
     func testDigestPromptCapsAt20() {
-        let summaries = (0..<30).map { (title: "T\($0)", summary: "s\($0)") }
-        let prompt = BailianService.makeDigestPrompt(summaries: summaries)
+        let items = (0..<30).map { i in
+            ArticleSnapshot.Item(id: UUID(), title: "T\(i)", summary: "s\(i)")
+        }
+        let prompt = BailianService.makeDigestPrompt(items: items)
         XCTAssertTrue(prompt.contains("T19｜s19"))
         XCTAssertFalse(prompt.contains("T20｜s20"))
+    }
+
+    func testDigestPromptSkipsNilSummary() {
+        // 防御：caller 通常已传 summarized，但 nil 项不应崩
+        let items: [ArticleSnapshot.Item] = [
+            .init(id: UUID(), title: "A", summary: "sa"),
+            .init(id: UUID(), title: "B", summary: nil),
+            .init(id: UUID(), title: "C", summary: "sc")
+        ]
+        let prompt = BailianService.makeDigestPrompt(items: items)
+        XCTAssertTrue(prompt.contains("A｜sa"))
+        XCTAssertFalse(prompt.contains("- B"), "nil-summary 项应跳过")
+        XCTAssertTrue(prompt.contains("C｜sc"))
     }
 }

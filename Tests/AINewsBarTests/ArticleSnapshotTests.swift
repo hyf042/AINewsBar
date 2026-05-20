@@ -13,8 +13,7 @@ final class ArticleSnapshotTests: XCTestCase {
         let s = ArticleSnapshot(all: [])
         XCTAssertEqual(s.summarizedCount, 0)
         XCTAssertTrue(s.summarized.isEmpty)
-        XCTAssertTrue(s.summarizedPairs.isEmpty)
-        XCTAssertTrue(s.pickInputs.isEmpty)
+        XCTAssertTrue(s.all.isEmpty)
     }
 
     func testSummarizedFiltering() {
@@ -27,23 +26,9 @@ final class ArticleSnapshotTests: XCTestCase {
         XCTAssertEqual(s.summarized.map(\.title), ["A", "C"])
     }
 
-    func testSummarizedPairsMapping() {
-        let s = snap([
-            ("A", "sa"),
-            ("B", nil),
-            ("C", "sc")
-        ])
-        let pairs = s.summarizedPairs
-        XCTAssertEqual(pairs.count, 2)
-        XCTAssertEqual(pairs[0].title, "A")
-        XCTAssertEqual(pairs[0].summary, "sa")
-        XCTAssertEqual(pairs[1].title, "C")
-    }
-
-    func testPickInputsKeepsAll() {
+    func testAllKeepsEverything() {
         let s = snap([("A", "sa"), ("B", nil), ("C", "sc")])
-        let picks = s.pickInputs
-        XCTAssertEqual(picks.count, 3, "pickInputs 含全部文章（含无摘要）")
-        XCTAssertNil(picks[1].summary)
+        XCTAssertEqual(s.all.count, 3, "all 含全部文章（含无摘要）")
+        XCTAssertNil(s.all[1].summary)
     }
 }

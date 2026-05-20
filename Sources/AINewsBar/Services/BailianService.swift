@@ -32,16 +32,16 @@ actor BailianService: AISummarizing {
         return try await chat(prompt: prompt, maxTokens: 150, apiKey: apiKey, model: model)
     }
 
-    func recommendArticles(_ articles: [(id: UUID, title: String, summary: String?)], apiKey: String, model: String) async throws -> [UUID] {
-        guard articles.count >= 3 else { return articles.map(\.id) }
-        let prompt = Self.makeRecommendPrompt(articles: articles)
+    func recommendArticles(_ items: [ArticleSnapshot.Item], apiKey: String, model: String) async throws -> [UUID] {
+        guard items.count >= 3 else { return items.map(\.id) }
+        let prompt = Self.makeRecommendPrompt(items: items)
         let response = try await chat(prompt: prompt, maxTokens: 20, apiKey: apiKey, model: model)
-        return Self.parseRecommendResponse(response, totalCount: articles.count)
-            .map { articles[$0 - 1].id }
+        return Self.parseRecommendResponse(response, totalCount: items.count)
+            .map { items[$0 - 1].id }
     }
 
-    func generateDigest(articleSummaries: [(title: String, summary: String)], apiKey: String, model: String) async throws -> String {
-        let prompt = Self.makeDigestPrompt(summaries: articleSummaries)
+    func generateDigest(items: [ArticleSnapshot.Item], apiKey: String, model: String) async throws -> String {
+        let prompt = Self.makeDigestPrompt(items: items)
         return try await chat(prompt: prompt, maxTokens: 300, apiKey: apiKey, model: model)
     }
 
@@ -56,11 +56,11 @@ actor BailianService: AISummarizing {
         """
     }
 
-    static func makeRecommendPrompt(articles: [(id: UUID, title: String, summary: String?)]) -> String {
-        let list = articles.prefix(50).enumerated()
-            .map { i, article -> String in
-                var line = "\(i + 1). \(article.title)"
-                if let s = article.summary { line += "｜\(s)" }
+    static func makeRecommendPrompt(items: [ArticleSnapshot.Item]) -> String {
+        let list = items.prefix(50).enumerated()
+            .map { i, item -> String in
+                var line = "\(i + 1). \(item.title)"
+                if let s = item.summary { line += "｜\(s)" }
                 return line
             }
             .joined(separator: "\n")
@@ -73,15 +73,18 @@ actor BailianService: AISummarizing {
         """
     }
 
-    static func makeDigestPrompt(summaries: [(title: String, summary: String)]) -> String {
-        let items = summaries.prefix(20)
-            .map { "- \($0.title)｜\($0.summary)" }
-            .joined(separator: "\n")
+    static func makeDigestPrompt(items: [ArticleSnapshot.Item]) -> String {
+        // 防御性：nil-summary 项跳过；caller 通常已传 summarized 子集
+        let lines = items.prefix(20).compactMap { item -> String? in
+            guard let s = item.summary else { return nil }
+            return "- \(item.title)｜\(s)"
+        }
+        .joined(separator: "\n")
 
         return """
         以下是今日 AI 资讯（标题｜摘要），请用中文写 2-3 句话概括今日最重要的 AI 进展，必须用中文回复：
 
-        \(items)
+        \(lines)
         """
     }
 

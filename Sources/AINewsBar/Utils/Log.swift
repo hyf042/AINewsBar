@@ -1,20 +1,12 @@
 import Foundation
+import os
 
+// 包装 os.Logger：调用点签名兼容（write(_:)）；线程安全、零文件 IO 开销
+// 输出可在 Console.app 用 subsystem=com.ainewsbar 过滤；Xcode 控制台直接可见
 enum Log {
-    private static let logURL = FileManager.default
-        .urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("AINewsBar-debug.log")
+    private static let logger = Logger(subsystem: "com.ainewsbar", category: "app")
 
     static func write(_ message: String) {
-        let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
-        guard let data = line.data(using: .utf8) else { return }
-        if FileManager.default.fileExists(atPath: logURL.path),
-           let handle = try? FileHandle(forWritingTo: logURL) {
-            handle.seekToEndOfFile()
-            handle.write(data)
-            try? handle.close()
-        } else {
-            try? data.write(to: logURL)
-        }
+        logger.info("\(message, privacy: .public)")
     }
 }

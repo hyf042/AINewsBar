@@ -11,8 +11,7 @@ let package = Package(
         .executableTarget(
             name: "AINewsBar",
             dependencies: ["FeedKit"],
-            path: "Sources/AINewsBar",
-            resources: [.process("Resources")]
+            path: "Sources/AINewsBar"
         ),
         .testTarget(
             name: "AINewsBarTests",

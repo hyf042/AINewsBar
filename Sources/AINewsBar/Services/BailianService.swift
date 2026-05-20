@@ -24,25 +24,25 @@ actor BailianService: AISummarizing {
     private let endpoint = URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")!
 
     func testConnection(apiKey: String, model: String) async throws {
-        _ = try await chat(prompt: "1", maxTokens: 1, apiKey: apiKey, modelOverride: model)
+        _ = try await chat(prompt: "1", maxTokens: 1, apiKey: apiKey, model: model)
     }
 
-    func generateSummary(title: String, content: String?, apiKey: String) async throws -> String {
+    func generateSummary(title: String, content: String?, apiKey: String, model: String) async throws -> String {
         let prompt = Self.makeSummaryPrompt(title: title, content: content)
-        return try await chat(prompt: prompt, maxTokens: 150, apiKey: apiKey)
+        return try await chat(prompt: prompt, maxTokens: 150, apiKey: apiKey, model: model)
     }
 
-    func recommendArticles(_ articles: [(id: UUID, title: String, summary: String?)], apiKey: String) async throws -> [UUID] {
+    func recommendArticles(_ articles: [(id: UUID, title: String, summary: String?)], apiKey: String, model: String) async throws -> [UUID] {
         guard articles.count >= 3 else { return articles.map(\.id) }
         let prompt = Self.makeRecommendPrompt(articles: articles)
-        let response = try await chat(prompt: prompt, maxTokens: 20, apiKey: apiKey)
+        let response = try await chat(prompt: prompt, maxTokens: 20, apiKey: apiKey, model: model)
         return Self.parseRecommendResponse(response, totalCount: articles.count)
             .map { articles[$0 - 1].id }
     }
 
-    func generateDigest(articleSummaries: [(title: String, summary: String)], apiKey: String) async throws -> String {
+    func generateDigest(articleSummaries: [(title: String, summary: String)], apiKey: String, model: String) async throws -> String {
         let prompt = Self.makeDigestPrompt(summaries: articleSummaries)
-        return try await chat(prompt: prompt, maxTokens: 300, apiKey: apiKey)
+        return try await chat(prompt: prompt, maxTokens: 300, apiKey: apiKey, model: model)
     }
 
     // MARK: - Prompt 构造（纯函数，可单测）
@@ -108,10 +108,9 @@ actor BailianService: AISummarizing {
 
     // MARK: - HTTP
 
-    private func chat(prompt: String, maxTokens: Int, apiKey: String, modelOverride: String? = nil) async throws -> String {
-        let activeModel = modelOverride ?? PreferencesService.shared.getModel()
+    private func chat(prompt: String, maxTokens: Int, apiKey: String, model: String) async throws -> String {
         let body: [String: Any] = [
-            "model": activeModel,
+            "model": model,
             "messages": [["role": "user", "content": prompt]],
             "max_tokens": maxTokens,
             "temperature": 0.3

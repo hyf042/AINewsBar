@@ -41,20 +41,20 @@ final class MockAI: AISummarizing, @unchecked Sendable {
     var recommendCallCount = 0
     var digestCallCount = 0
 
-    func generateSummary(title: String, content: String?, apiKey: String) async throws -> String {
+    func generateSummary(title: String, content: String?, apiKey: String, model: String) async throws -> String {
         summaryCallCount += 1
         if let e = summaryError { throw e }
         return summaryProvider?(title, content) ?? "mock-summary-of-\(title)"
     }
 
-    func recommendArticles(_ articles: [(id: UUID, title: String, summary: String?)], apiKey: String) async throws -> [UUID] {
+    func recommendArticles(_ articles: [(id: UUID, title: String, summary: String?)], apiKey: String, model: String) async throws -> [UUID] {
         recommendCallCount += 1
         if let e = recommendError { throw e }
         if let p = recommendProvider { return p(articles) }
         return Array(articles.prefix(3).map(\.id))
     }
 
-    func generateDigest(articleSummaries: [(title: String, summary: String)], apiKey: String) async throws -> String {
+    func generateDigest(articleSummaries: [(title: String, summary: String)], apiKey: String, model: String) async throws -> String {
         digestCallCount += 1
         if let e = digestError { throw e }
         return digestProvider?(articleSummaries) ?? "mock-digest-\(articleSummaries.count)"
@@ -63,12 +63,14 @@ final class MockAI: AISummarizing, @unchecked Sendable {
 
 final class InMemoryPrefs: PreferencesStoring {
     var apiKey: String? = "mock-api-key"
+    var model: String = "mock-model"
     var digestContent: String?
     var digestDate: Date?
     var digestArticleCount = 0
     var recommendArticleCount = 0
 
     func getAPIKey() -> String? { apiKey }
+    func getModel() -> String { model }
 
     func loadDigest() -> (content: String, date: Date)? {
         guard let c = digestContent, let d = digestDate else { return nil }

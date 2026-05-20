@@ -1,6 +1,12 @@
 import Foundation
 import SwiftData
 
+enum AIAvailability {
+    case unknown
+    case available
+    case unavailable(String)
+}
+
 @MainActor
 final class RefreshService: ObservableObject {
     static let shared = RefreshService()
@@ -11,6 +17,7 @@ final class RefreshService: ObservableObject {
     @Published var lastError: String?
     @Published var dailyDigest: String?
     @Published var recommendedArticleIDs: [UUID] = []
+    @Published var aiAvailability: AIAvailability = .unknown
 
     private var timer: Timer?
     private let refreshInterval: TimeInterval = 3600
@@ -18,12 +25,26 @@ final class RefreshService: ObservableObject {
 
     private var modelContext: ModelContext?
     private var configured = false
+    @Published var lastDigestDate: Date?
+    @Published var lastRecommendDate: Date?
+    private let digestRegenerateInterval: TimeInterval = 3 * 3600
 
     func configure(with context: ModelContext) {
         modelContext = context
+        loadPersistedDigest()
         guard !configured else { return }
         configured = true
         scheduleTimer()
+    }
+
+    private func loadPersistedDigest() {
+        guard let (content, date) = KeychainService.shared.loadDigest() else { return }
+        if Calendar.current.isDateInToday(date) {
+            dailyDigest = content
+            lastDigestDate = date
+        } else {
+            KeychainService.shared.clearDigest()
+        }
     }
 
     // Unstructured task — not cancelled when popover closes
@@ -89,7 +110,7 @@ final class RefreshService: ObservableObject {
 
         lastRefreshDate = Date()
         postUnreadCount(context: context)
-        await generatePendingSummaries(context: context)
+        await generatePendingSummaries(context: context, hasNewArticles: !newArticles.isEmpty)
     }
 
     func postUnreadCount(context: ModelContext) {
@@ -114,15 +135,18 @@ final class RefreshService: ObservableObject {
         if !old.isEmpty { try? context.save() }
     }
 
-    private func generatePendingSummaries(context: ModelContext) async {
+    private func generatePendingSummaries(context: ModelContext, hasNewArticles: Bool) async {
         let apiKey = KeychainService.shared.getAPIKey() ?? ""
-        guard !apiKey.isEmpty else { return }
+        guard !apiKey.isEmpty else {
+            aiAvailability = .unavailable("未配置 API Key")
+            return
+        }
 
         let pending = (try? context.fetch(
             FetchDescriptor<Article>(predicate: #Predicate { $0.aiSummary == nil })
         )) ?? []
         guard !pending.isEmpty else {
-            await generateDailyDigestIfNeeded(context: context, apiKey: apiKey)
+            await generateDailyDigestIfNeeded(context: context, apiKey: apiKey, hasNewArticles: hasNewArticles)
             return
         }
 
@@ -139,10 +163,10 @@ final class RefreshService: ObservableObject {
             }
         }
         try? context.save()
-        await generateDailyDigestIfNeeded(context: context, apiKey: apiKey)
+        await generateDailyDigestIfNeeded(context: context, apiKey: apiKey, hasNewArticles: hasNewArticles)
     }
 
-    private func generateDailyDigestIfNeeded(context: ModelContext, apiKey: String) async {
+    private func generateDailyDigestIfNeeded(context: ModelContext, apiKey: String, hasNewArticles: Bool) async {
         let all = (try? context.fetch(FetchDescriptor<Article>())) ?? []
         let withSummary = all.compactMap { a -> (title: String, summary: String)? in
             guard let s = a.aiSummary else { return nil }
@@ -153,21 +177,42 @@ final class RefreshService: ObservableObject {
         isSummarizing = true
         defer { isSummarizing = false }
 
-        // 每次刷新都重新生成推荐
-        let articlesForPick = all.map { (id: $0.id, title: $0.title) }
-        if let ids = try? await BailianService.shared.recommendArticles(articlesForPick, apiKey: apiKey) {
-            recommendedArticleIDs = ids
-            Log.write("[Recommend] picked \(ids.count) articles")
+        // 推荐：有新文章 或 列表为空时生成
+        if hasNewArticles || recommendedArticleIDs.isEmpty {
+            let articlesForPick = all.map { (id: $0.id, title: $0.title, summary: $0.aiSummary) }
+            do {
+                let ids = try await BailianService.shared.recommendArticles(articlesForPick, apiKey: apiKey)
+                recommendedArticleIDs = ids
+                lastRecommendDate = Date()
+                aiAvailability = .available
+                Log.write("[Recommend] picked \(ids.count) articles")
+            } catch {
+                aiAvailability = .unavailable(error.localizedDescription)
+                Log.write("[Recommend] ERROR: \(error)")
+            }
+        } else {
+            Log.write("[Recommend] skip — no new articles")
         }
 
-        // 摘要只在为空时生成（当天不变）
-        if dailyDigest == nil {
+        // 日报：从未生成 或 (有新文章 且 距上次生成超过3小时)
+        if dailyDigest == nil || (hasNewArticles && shouldRegenerateDigest()) {
             Log.write("[Digest] generating from \(withSummary.count) articles")
             if let digest = try? await BailianService.shared.generateDigest(articleSummaries: withSummary, apiKey: apiKey) {
+                let now = Date()
                 dailyDigest = digest
-                Log.write("[Digest] OK")
+                lastDigestDate = now
+                KeychainService.shared.saveDigest(content: digest, date: now)
+                Log.write("[Digest] OK, saved to disk")
             }
+        } else {
+            Log.write("[Digest] skip — digest exists, hasNew=\(hasNewArticles), nextRegen in \(Int((lastDigestDate.map { digestRegenerateInterval - Date().timeIntervalSince($0) } ?? 0)))s")
         }
+    }
+
+    private func shouldRegenerateDigest() -> Bool {
+        guard let last = lastDigestDate else { return true }
+        guard Calendar.current.isDateInToday(last) else { return true }
+        return Date().timeIntervalSince(last) > digestRegenerateInterval
     }
 }
 

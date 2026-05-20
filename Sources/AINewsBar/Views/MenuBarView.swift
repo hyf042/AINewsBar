@@ -5,21 +5,31 @@ struct MenuBarView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openSettings) private var openSettings
     @Query(filter: #Predicate<Article> { $0.isRead == false },
-           sort: \Article.publishedAt,
-           order: .reverse) private var articles: [Article]
+           sort: \Article.publishedAt, order: .reverse)
+    private var unreadArticles: [Article]
+    @Query(filter: #Predicate<Article> { $0.isRead == true },
+           sort: \Article.publishedAt, order: .reverse)
+    private var readArticles: [Article]
     @ObservedObject private var refreshService = RefreshService.shared
+
+    private var totalCount: Int { unreadArticles.count + readArticles.count }
     @State private var isDigestExpanded = false
+    @State private var isDigestHovered = false
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            articleList
-            if !articles.isEmpty || refreshService.dailyDigest != nil {
+            if case .unavailable(let reason) = refreshService.aiAvailability {
+                aiUnavailableBanner(reason: reason)
                 Divider()
-                digestSection
+            }
+            articleList
+            if !unreadArticles.isEmpty || refreshService.dailyDigest != nil {
                 Divider()
                 recommendSection
+                Divider()
+                digestSection
             }
             Divider()
             footer
@@ -35,7 +45,7 @@ struct MenuBarView: View {
 
     private var header: some View {
         HStack {
-            Text("AI 资讯 [\(articles.count)]")
+            Text("AI 资讯 [\(unreadArticles.count)/\(totalCount)]")
                 .font(.headline)
             Spacer()
             if refreshService.isSummarizing {
@@ -72,36 +82,46 @@ struct MenuBarView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 4) {
                         Image(systemName: "brain")
-                            .font(.caption)
+                            .font(.footnote)
                             .foregroundStyle(.secondary)
                         Text("今日 AI 资讯摘要")
-                            .font(.caption)
+                            .font(.footnote.weight(.medium))
                             .foregroundStyle(.secondary)
+                        if let date = refreshService.lastDigestDate {
+                            Text(date, style: .time)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
                         Spacer()
-                        Image(systemName: isDigestExpanded ? "chevron.up" : "chevron.down")
+                        Image(systemName: (isDigestExpanded || isDigestHovered) ? "chevron.up" : "chevron.down")
                             .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
                     }
                     Text(digest)
                         .font(.system(size: 12))
                         .foregroundStyle(.primary)
-                        .lineLimit(isDigestExpanded ? nil : 5)
+                        .lineLimit((isDigestExpanded || isDigestHovered) ? nil : 5)
                         .fixedSize(horizontal: false, vertical: true)
-                        .animation(.easeInOut(duration: 0.2), value: isDigestExpanded)
+                        .animation(.easeInOut(duration: 0.2), value: isDigestExpanded || isDigestHovered)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.accentColor.opacity(0.06))
+                .background(.quaternary)
                 .contentShape(Rectangle())
                 .onTapGesture { isDigestExpanded.toggle() }
+                .onHover { hovering in
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isDigestHovered = hovering
+                    }
+                }
             } else {
                 HStack(spacing: 8) {
                     Image(systemName: "brain")
-                        .font(.caption)
+                        .font(.footnote)
                         .foregroundStyle(.tertiary)
                     Text("今日 AI 资讯摘要")
-                        .font(.caption)
+                        .font(.footnote.weight(.medium))
                         .foregroundStyle(.tertiary)
                     Spacer()
                     if refreshService.isSummarizing {
@@ -118,6 +138,7 @@ struct MenuBarView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity)
+                .background(.quaternary)
             }
         }
     }
@@ -128,11 +149,16 @@ struct MenuBarView: View {
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 4) {
                 Image(systemName: "star.fill")
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(loading ? Color.secondary : Color.orange)
                 Text("AI 今日推荐")
-                    .font(.caption)
+                    .font(.footnote.weight(.medium))
                     .foregroundStyle(.secondary)
+                if let date = refreshService.lastRecommendDate {
+                    Text(date, style: .time)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
                 Spacer()
                 if loading {
                     if refreshService.isSummarizing {
@@ -167,37 +193,16 @@ struct MenuBarView: View {
             } else {
                 ForEach(Array(picks.enumerated()), id: \.element.id) { index, article in
                     VStack(spacing: 0) {
-                        HStack(alignment: .top, spacing: 8) {
-                            Text("\(index + 1)")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.orange)
-                                .frame(width: 14)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(article.title)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .lineLimit(2)
-                                if let summary = article.aiSummary {
-                                    Text(summary)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                }
-                                Text(article.feedTitle)
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            Spacer()
+                        RecommendItemView(index: index + 1, article: article) {
+                            openArticle(article)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .contentShape(Rectangle())
-                        .onTapGesture { openArticle(article) }
                         if index < picks.count - 1 { Divider().padding(.leading, 34) }
                     }
                 }
             }
         }
         .padding(.bottom, 4)
+        .background(.quaternary)
     }
 
     private var recommendedArticles: [Article] {
@@ -208,19 +213,42 @@ struct MenuBarView: View {
 
     private var articleList: some View {
         Group {
-            if refreshService.isRefreshing && articles.isEmpty {
+            if refreshService.isRefreshing && totalCount == 0 {
                 loadingState
-            } else if let error = refreshService.lastError, articles.isEmpty {
+            } else if let error = refreshService.lastError, totalCount == 0 {
                 errorState(error)
-            } else if articles.isEmpty {
+            } else if totalCount == 0 {
                 emptyState
             } else {
-                List(articles) { article in
-                    ArticleRowView(article: article) {
-                        openArticle(article)
+                List {
+                    ForEach(unreadArticles) { article in
+                        ArticleRowView(article: article) {
+                            openArticle(article)
+                        }
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.visible)
                     }
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.visible)
+                    if !readArticles.isEmpty {
+                        HStack {
+                            Text("已读 (\(readArticles.count))")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color(nsColor: .separatorColor).opacity(0.12))
+
+                        ForEach(readArticles) { article in
+                            ArticleRowView(article: article) {
+                                openArticle(article)
+                            }
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.visible)
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .frame(height: 400)
@@ -267,6 +295,30 @@ struct MenuBarView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(40)
+    }
+
+    private func aiUnavailableBanner(reason: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .font(.system(size: 11))
+            Text("AI 不可用：\(reason)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer()
+            Button("去设置") {
+                NSApp.activate(ignoringOtherApps: true)
+                openSettings()
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(Color.accentColor)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .background(Color.orange.opacity(0.08))
     }
 
     private var footer: some View {
@@ -357,5 +409,48 @@ struct MenuBarView: View {
         article.isRead = true
         try? modelContext.save()
         refreshService.postUnreadCount(context: modelContext)
+    }
+}
+
+private struct RecommendItemView: View {
+    let index: Int
+    let article: Article
+    let onTap: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(index)")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.orange)
+                .frame(width: 14)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(article.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(2)
+                if let summary = article.aiSummary {
+                    Text(summary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(isHovered ? nil : 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .animation(.easeInOut(duration: 0.15), value: isHovered)
+                }
+                Text(article.feedTitle)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
     }
 }

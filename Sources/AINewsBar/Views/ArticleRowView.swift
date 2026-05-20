@@ -4,6 +4,8 @@ struct ArticleRowView: View {
     let article: Article
     let onTap: () -> Void
 
+    @State private var isHovered = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -26,8 +28,9 @@ struct ArticleRowView: View {
                 Text(summary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(isHovered ? nil : 1)
                     .multilineTextAlignment(.leading)
+                    .animation(.easeInOut(duration: 0.15), value: isHovered)
             }
         }
         .padding(.vertical, 6)
@@ -36,5 +39,10 @@ struct ArticleRowView: View {
         .background(article.isRead ? Color.clear : Color.accentColor.opacity(0.05))
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
     }
 }

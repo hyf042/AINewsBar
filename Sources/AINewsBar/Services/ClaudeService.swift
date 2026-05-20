@@ -4,7 +4,10 @@ actor BailianService {
     static let shared = BailianService()
 
     private let endpoint = URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")!
-    private let model = "qwen-plus"
+
+    func testConnection(apiKey: String, model: String) async throws {
+        _ = try await chat(prompt: "1", maxTokens: 1, apiKey: apiKey, modelOverride: model)
+    }
 
     func generateSummary(for article: Article, apiKey: String) async throws -> String {
         let prompt = """
@@ -17,15 +20,19 @@ actor BailianService {
     }
 
     // 返回推荐文章的索引（0-based），从列表中挑选3篇
-    func recommendArticles(_ articles: [(id: UUID, title: String)], apiKey: String) async throws -> [UUID] {
+    func recommendArticles(_ articles: [(id: UUID, title: String, summary: String?)], apiKey: String) async throws -> [UUID] {
         guard articles.count >= 3 else { return articles.map(\.id) }
 
         let list = articles.prefix(50).enumerated()
-            .map { "\($0.offset + 1). \($0.element.title)" }
+            .map { i, article -> String in
+                var line = "\(i + 1). \(article.title)"
+                if let s = article.summary { line += "｜\(s)" }
+                return line
+            }
             .joined(separator: "\n")
 
         let prompt = """
-        以下是今日 AI 资讯列表，请从中挑选3篇最值得阅读的文章。\
+        以下是今日 AI 资讯列表（标题｜摘要），请从中挑选3篇最值得阅读的文章。\
         只返回序号，用英文逗号分隔，不要其他内容，例如：2,7,15
 
         \(list)
@@ -57,9 +64,10 @@ actor BailianService {
         return try await chat(prompt: prompt, maxTokens: 300, apiKey: apiKey)
     }
 
-    private func chat(prompt: String, maxTokens: Int, apiKey: String) async throws -> String {
+    private func chat(prompt: String, maxTokens: Int, apiKey: String, modelOverride: String? = nil) async throws -> String {
+        let activeModel = modelOverride ?? KeychainService.shared.getModel()
         let body: [String: Any] = [
-            "model": model,
+            "model": activeModel,
             "messages": [["role": "user", "content": prompt]],
             "max_tokens": maxTokens,
             "temperature": 0.3

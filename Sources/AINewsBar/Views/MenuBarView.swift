@@ -246,7 +246,7 @@ struct MenuBarView: View {
     private var recommendedArticles: [Article] {
         let ids = Set(refreshService.recommendedArticleIDs)
         guard !ids.isEmpty else { return [] }
-        return (try? modelContext.fetch(FetchDescriptor<Article>()))?.filter { ids.contains($0.id) } ?? []
+        return modelContext.safeFetch(FetchDescriptor<Article>()).filter { ids.contains($0.id) }
     }
 
     private var articleList: some View {
@@ -410,17 +410,17 @@ struct MenuBarView: View {
 
     private func syncBuiltInFeeds() {
         let expectedURLs = Set(BuiltInFeeds.all.map(\.url))
-        let existing = (try? modelContext.fetch(
+        let existing = modelContext.safeFetch(
             FetchDescriptor<Feed>(predicate: #Predicate { $0.isBuiltIn == true })
-        )) ?? []
+        )
 
         // 删除已失效的内置源及其文章
         let toRemove = existing.filter { !expectedURLs.contains($0.url) }
         for feed in toRemove {
             let feedID = feed.id
-            let orphans = (try? modelContext.fetch(
+            let orphans = modelContext.safeFetch(
                 FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
-            )) ?? []
+            )
             orphans.forEach { modelContext.delete($0) }
             modelContext.delete(feed)
         }
@@ -433,13 +433,13 @@ struct MenuBarView: View {
             .forEach { modelContext.insert($0) }
 
         deduplicateArticles()
-        try? modelContext.save()
+        modelContext.safeSave()
     }
 
     private func deduplicateArticles() {
-        let all = (try? modelContext.fetch(
+        let all = modelContext.safeFetch(
             FetchDescriptor<Article>(sortBy: [SortDescriptor(\.publishedAt, order: .reverse)])
-        )) ?? []
+        )
         var seen = Set<String>()
         for article in all {
             if seen.contains(article.url) {
@@ -454,7 +454,7 @@ struct MenuBarView: View {
         guard let url = URL(string: article.url) else { return }
         NSWorkspace.shared.open(url)
         article.isRead = true
-        try? modelContext.save()
+        modelContext.safeSave()
         refreshService.postUnreadCount(context: modelContext)
     }
 }

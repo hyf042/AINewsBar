@@ -71,7 +71,7 @@ struct FeedsSettingsView: View {
                     .onDelete { indexSet in
                         let custom = feeds.filter { !$0.isBuiltIn }
                         indexSet.map { custom[$0] }.forEach { modelContext.delete($0) }
-                        try? modelContext.save()
+                        modelContext.safeSave()
                     }
                 }
             }
@@ -209,12 +209,12 @@ struct BuiltInFeedRowView: View {
     private func handleToggle(enabled: Bool) {
         let feedID = feed.id
         if !enabled {
-            let articles = (try? modelContext.fetch(
+            let articles = modelContext.safeFetch(
                 FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
-            )) ?? []
+            )
             articles.forEach { modelContext.delete($0) }
         }
-        try? modelContext.save()
+        modelContext.safeSave()
         if enabled { Task { await RefreshService.shared.refresh() } }
     }
 }
@@ -338,7 +338,7 @@ struct AddFeedSheet: View {
     private func addFeed() {
         let feed = Feed(title: title, url: url, isBuiltIn: false)
         modelContext.insert(feed)
-        try? modelContext.save()
+        modelContext.safeSave()
         isPresented = false
     }
 }

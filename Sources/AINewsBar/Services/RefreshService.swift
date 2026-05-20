@@ -95,10 +95,10 @@ final class RefreshService: ObservableObject {
         lastError = nil
         defer { isRefreshing = false }
 
-        let feeds = (try? context.fetch(
+        let feeds = context.safeFetch(
             FetchDescriptor<Feed>(predicate: #Predicate { $0.isEnabled == true })
-        )) ?? []
-        let existingURLs = Set((try? context.fetch(FetchDescriptor<Article>()))?.map(\.url) ?? [])
+        )
+        let existingURLs = Set(context.safeFetch(FetchDescriptor<Article>()).map(\.url))
         let startOfToday = Calendar.current.startOfDay(for: Date())
 
         cleanupOldArticles(context: context, before: startOfToday)
@@ -152,7 +152,7 @@ final class RefreshService: ObservableObject {
 
         if !newArticles.isEmpty {
             newArticles.forEach { context.insert($0) }
-            try? context.save()
+            context.safeSave()
         }
 
         lastFetchErrorCount = fetchErrors.count
@@ -164,9 +164,9 @@ final class RefreshService: ObservableObject {
     }
 
     func postUnreadCount(context: ModelContext) {
-        let count = (try? context.fetchCount(
+        let count = context.safeFetchCount(
             FetchDescriptor<Article>(predicate: #Predicate { $0.isRead == false })
-        )) ?? 0
+        )
         NotificationCenter.default.post(name: .unreadCountChanged, object: count)
     }
 
@@ -178,11 +178,11 @@ final class RefreshService: ObservableObject {
     }
 
     private func cleanupOldArticles(context: ModelContext, before date: Date) {
-        let old = (try? context.fetch(
+        let old = context.safeFetch(
             FetchDescriptor<Article>(predicate: #Predicate { $0.publishedAt < date })
-        )) ?? []
+        )
         old.forEach { context.delete($0) }
-        if !old.isEmpty { try? context.save() }
+        if !old.isEmpty { context.safeSave() }
     }
 
     private func generatePendingSummaries(context: ModelContext, hasNewArticles: Bool) async {
@@ -192,9 +192,9 @@ final class RefreshService: ObservableObject {
             return
         }
 
-        let pending = (try? context.fetch(
+        let pending = context.safeFetch(
             FetchDescriptor<Article>(predicate: #Predicate { $0.aiSummary == nil })
-        )) ?? []
+        )
         guard !pending.isEmpty else {
             await generateDailyDigestIfNeeded(context: context, apiKey: apiKey,
                                               hasNewArticles: hasNewArticles, hasEnoughCoverage: true)
@@ -256,7 +256,7 @@ final class RefreshService: ObservableObject {
         for article in pending {
             if let s = resultMap[article.id] { article.aiSummary = s }
         }
-        try? context.save()
+        context.safeSave()
 
         let rate = RefreshDecision.completionRate(completed: completed.count, total: tasks.count)
         Log.write("[Summary] done: \(completed.count)/\(tasks.count) = \(Int(rate * 100))%")
@@ -268,7 +268,7 @@ final class RefreshService: ObservableObject {
 
     private func generateDailyDigestIfNeeded(context: ModelContext, apiKey: String,
                                               hasNewArticles: Bool, hasEnoughCoverage: Bool) async {
-        let all = (try? context.fetch(FetchDescriptor<Article>())) ?? []
+        let all = context.safeFetch(FetchDescriptor<Article>())
         let withSummary = all.compactMap { a -> (title: String, summary: String)? in
             guard let s = a.aiSummary else { return nil }
             return (title: a.title, summary: s)
@@ -347,7 +347,7 @@ final class RefreshService: ObservableObject {
         isRegeneratingRecommend = true
         defer { isRegeneratingRecommend = false }
 
-        let all = (try? context.fetch(FetchDescriptor<Article>())) ?? []
+        let all = context.safeFetch(FetchDescriptor<Article>())
         let articlesForPick = all.map { (id: $0.id, title: $0.title, summary: $0.aiSummary) }
         guard articlesForPick.count >= 3 else { return }
 
@@ -375,7 +375,7 @@ final class RefreshService: ObservableObject {
         isRegeneratingDigest = true
         defer { isRegeneratingDigest = false }
 
-        let all = (try? context.fetch(FetchDescriptor<Article>())) ?? []
+        let all = context.safeFetch(FetchDescriptor<Article>())
         let withSummary = all.compactMap { a -> (title: String, summary: String)? in
             guard let s = a.aiSummary else { return nil }
             return (title: a.title, summary: s)

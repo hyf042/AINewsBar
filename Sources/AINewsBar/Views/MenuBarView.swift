@@ -13,6 +13,13 @@ struct MenuBarView: View {
     @ObservedObject private var refreshService = RefreshService.shared
 
     private var totalCount: Int { unreadArticles.count + readArticles.count }
+
+    private var listHeight: CGFloat {
+        let rowHeight: CGFloat = 52
+        let separatorHeight: CGFloat = readArticles.isEmpty ? 0 : 28
+        return min(max(CGFloat(totalCount) * rowHeight + separatorHeight, 120), 460)
+    }
+
     @State private var isDigestExpanded = false
     @State private var isDigestHovered = false
 
@@ -93,6 +100,20 @@ struct MenuBarView: View {
                                 .foregroundStyle(.tertiary)
                         }
                         Spacer()
+                        if refreshService.isRegeneratingDigest {
+                            ProgressView().scaleEffect(0.55).frame(width: 12, height: 12)
+                        } else {
+                            Button {
+                                Task { await refreshService.forceRegenerateDigest() }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 10))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.tertiary)
+                            .disabled(refreshService.isRegeneratingDigest || refreshService.isSummarizing)
+                            .help("重新生成摘要")
+                        }
                         Image(systemName: (isDigestExpanded || isDigestHovered) ? "chevron.up" : "chevron.down")
                             .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
@@ -124,15 +145,22 @@ struct MenuBarView: View {
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(.tertiary)
                     Spacer()
-                    if refreshService.isSummarizing {
+                    if refreshService.isRegeneratingDigest || refreshService.isSummarizing {
                         ProgressView().scaleEffect(0.55).frame(width: 12, height: 12)
                         Text("生成中…")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     } else {
-                        Text("待生成")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                        Button {
+                            Task { await refreshService.forceRegenerateDigest() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tertiary)
+                        .disabled(refreshService.isRegeneratingDigest || refreshService.isSummarizing)
+                        .help("重新生成摘要")
                     }
                 }
                 .padding(.horizontal, 12)
@@ -160,13 +188,23 @@ struct MenuBarView: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
-                if loading {
-                    if refreshService.isSummarizing {
-                        ProgressView().scaleEffect(0.55).frame(width: 12, height: 12)
-                        Text("生成中…").font(.caption2).foregroundStyle(.tertiary)
-                    } else {
-                        Text("待生成").font(.caption2).foregroundStyle(.tertiary)
+                if refreshService.isRegeneratingRecommend {
+                    ProgressView().scaleEffect(0.55).frame(width: 12, height: 12)
+                    Text("生成中…").font(.caption2).foregroundStyle(.tertiary)
+                } else if loading && refreshService.isSummarizing {
+                    ProgressView().scaleEffect(0.55).frame(width: 12, height: 12)
+                    Text("生成中…").font(.caption2).foregroundStyle(.tertiary)
+                } else {
+                    Button {
+                        Task { await refreshService.forceRegenerateRecommend() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 10))
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tertiary)
+                    .disabled(refreshService.isRegeneratingRecommend || refreshService.isSummarizing)
+                    .help("重新生成推荐")
                 }
             }
             .padding(.horizontal, 12)
@@ -251,7 +289,7 @@ struct MenuBarView: View {
                     }
                 }
                 .listStyle(.plain)
-                .frame(height: 400)
+                .frame(height: listHeight)
             }
         }
     }
@@ -338,6 +376,15 @@ struct MenuBarView: View {
                     .foregroundStyle(.tertiary)
             }
             Spacer()
+            if refreshService.lastFetchErrorCount > 0 {
+                Button("⚠ \(refreshService.lastFetchErrorCount) 个源失败") {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openSettings()
+                }
+                .buttonStyle(.plain)
+                .font(.caption2)
+                .foregroundStyle(.orange)
+            }
             Button {
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()

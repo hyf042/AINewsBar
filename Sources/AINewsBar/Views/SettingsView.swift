@@ -348,7 +348,7 @@ struct AddFeedSheet: View {
 struct APISettingsView: View {
     @State private var apiKey = ""
     @State private var isRevealed = false
-    @State private var selectedModel = KeychainService.defaultModel
+    @State private var selectedModel = PreferencesService.defaultModel
     @State private var useCustomModel = false
     @State private var customModel = ""
     @State private var checkStatus: CheckStatus = .idle
@@ -446,8 +446,8 @@ struct APISettingsView: View {
     }
 
     private func loadSettings() {
-        apiKey = KeychainService.shared.getAPIKey() ?? ""
-        let saved = KeychainService.shared.getModel()
+        apiKey = PreferencesService.shared.getAPIKey() ?? ""
+        let saved = PreferencesService.shared.getModel()
         let allModels = Self.modelGroups.flatMap(\.models)
         if allModels.contains(saved) {
             selectedModel = saved
@@ -460,8 +460,8 @@ struct APISettingsView: View {
 
     @MainActor
     private func saveAndCheck() async {
-        KeychainService.shared.saveAPIKey(apiKey)
-        KeychainService.shared.saveModel(effectiveModel)
+        PreferencesService.shared.saveAPIKey(apiKey)
+        PreferencesService.shared.saveModel(effectiveModel)
         await checkConnection()
     }
 

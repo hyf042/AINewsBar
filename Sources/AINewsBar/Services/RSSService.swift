@@ -9,7 +9,7 @@ struct RawArticle: Sendable {
     let publishedAt: Date
 }
 
-actor RSSService {
+actor RSSService: RSSFetching {
     static let shared = RSSService()
 
     func fetchRawArticles(feedURL: String) async throws -> [RawArticle] {

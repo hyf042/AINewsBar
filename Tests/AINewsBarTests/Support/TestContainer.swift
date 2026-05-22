@@ -6,7 +6,7 @@ import SwiftData
 @MainActor
 enum TestContainer {
     static func make() throws -> (ModelContainer, ModelContext) {
-        let schema = Schema([Article.self, Feed.self])
+        let schema = Schema([Article.self, Feed.self, UsageRecord.self])
         let config = ModelConfiguration("test-\(UUID().uuidString)", schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [config])
         return (container, container.mainContext)

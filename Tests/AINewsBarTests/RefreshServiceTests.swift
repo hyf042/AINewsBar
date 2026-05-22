@@ -24,6 +24,8 @@ final class RefreshServiceTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        // 显式 stop() 清理 Timer.scheduledTimer，避免 N 个测试实例在 RunLoop 上堆积孤儿 timer
+        service?.stop()
         service = nil
         prefs = nil
         ai = nil
@@ -37,6 +39,10 @@ final class RefreshServiceTests: XCTestCase {
 
     private func makeRaw(_ url: String, title: String = "T", at: Date = Date()) -> RawArticle {
         RawArticle(title: title, url: url, content: "content-\(title)", publishedAt: at)
+    }
+
+    private func makeRawNoDate(_ url: String, title: String = "T") -> RawArticle {
+        RawArticle(title: title, url: url, content: "content-\(title)", publishedAt: nil)
     }
 
     private func seedFeed(_ url: String, title: String = "F") -> Feed {
@@ -60,6 +66,18 @@ final class RefreshServiceTests: XCTestCase {
 
         XCTAssertEqual(fetchArticles().count, 2)
         XCTAssertNotNil(service.lastRefreshDate)
+    }
+
+    // P11: 无 pubDate 的 RawArticle 不入库（避免每天重生脏文章）
+    func testRefreshSkipsArticlesWithoutPublishedAt() async {
+        let feed = seedFeed("https://f/feed")
+        rss.setSuccess(feed.url, [
+            makeRaw("https://a/with-date"),
+            makeRawNoDate("https://a/no-date")
+        ])
+        await service.refresh()
+        let urls = fetchArticles().map(\.url).sorted()
+        XCTAssertEqual(urls, ["https://a/with-date"], "无 pubDate 的文章应被丢弃")
     }
 
     func testRefreshSkipsDuplicateURLs() async {
@@ -286,5 +304,98 @@ final class RefreshServiceTests: XCTestCase {
         } else {
             XCTFail("推荐失败应记录为 unavailable")
         }
+    }
+
+    // MARK: - resetCrossedDayStateIfNeeded（跨日全量重置）
+
+    func testCrossedDayResetRemovesYesterdayArticles() {
+        let feed = seedFeed("https://f/feed")
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+        context.insert(Article(title: "old", url: "https://a/old", publishedAt: yesterday,
+                               feedID: feed.id, feedTitle: feed.title))
+        let today = Calendar.current.startOfDay(for: Date())
+            .addingTimeInterval(3600)
+        context.insert(Article(title: "new", url: "https://a/new", publishedAt: today,
+                               feedID: feed.id, feedTitle: feed.title))
+        try? context.save()
+
+        service.lastRefreshDate = yesterday
+        service.resetCrossedDayStateIfNeeded()
+
+        let urls = fetchArticles().map(\.url).sorted()
+        XCTAssertEqual(urls, ["https://a/new"], "跨日时应清掉昨天的文章，保留今天的")
+    }
+
+    // 关键回归测试：跨日时 @Published 的 UI 状态必须被清空
+    // 否则用户打开菜单仍会看到昨天的 digest / 推荐内容直到 refresh 完成
+    func testCrossedDayResetClearsUIState() {
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+        service.lastRefreshDate = yesterday
+        service.dailyDigest = "昨天的摘要"
+        service.recommendedArticleIDs = [UUID(), UUID()]
+        service.lastDigestDate = yesterday
+        service.lastRecommendDate = yesterday
+        prefs.saveDigest(content: "昨天的摘要", date: yesterday)
+        prefs.saveDigestArticleCount(5)
+        prefs.saveRecommendArticleCount(5)
+
+        service.resetCrossedDayStateIfNeeded()
+
+        XCTAssertNil(service.dailyDigest, "@Published dailyDigest 必须被清空")
+        XCTAssertEqual(service.recommendedArticleIDs, [], "推荐 ID 必须被清空")
+        XCTAssertNil(service.lastDigestDate)
+        XCTAssertNil(service.lastRecommendDate)
+        XCTAssertNil(prefs.digestContent, "prefs 的 digest 必须被清空")
+    }
+
+    func testCrossedDayResetNoopWhenLastResetIsToday() {
+        let feed = seedFeed("https://f/feed")
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+        context.insert(Article(title: "old", url: "https://a/old", publishedAt: yesterday,
+                               feedID: feed.id, feedTitle: feed.title))
+        try? context.save()
+
+        // 新实现：用 lastResetCheckDate 而非 lastRefreshDate 做 guard
+        // 这是修复"裸 refresh() 末尾写 lastRefreshDate 抹掉跨日信号"的关键
+        service.lastResetCheckDate = Date()
+        service.dailyDigest = "今天的摘要"
+        service.resetCrossedDayStateIfNeeded()
+
+        XCTAssertEqual(fetchArticles().map(\.url), ["https://a/old"], "同日不应触发清理")
+        XCTAssertEqual(service.dailyDigest, "今天的摘要", "同日不应清 UI 状态")
+    }
+
+    /// 首次启动场景：lastResetCheckDate 为 nil 时应触发首次 reset
+    /// 这是新逻辑相对旧逻辑（lastRefreshDate nil 时 noop）的语义改进：
+    /// 首次启动如果旧库残留昨天文章，应当被清理掉，而不是等到下次 refresh
+    func testCrossedDayResetFirstRunTriggersCleanup() {
+        let feed = seedFeed("https://f/feed")
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+        context.insert(Article(title: "old", url: "https://a/old", publishedAt: yesterday,
+                               feedID: feed.id, feedTitle: feed.title))
+        try? context.save()
+
+        XCTAssertNil(service.lastResetCheckDate, "首次启动 lastResetCheckDate 应为 nil")
+        service.resetCrossedDayStateIfNeeded()
+
+        XCTAssertEqual(fetchArticles().count, 0, "首次启动应清理旧库残留的昨天文章")
+        XCTAssertNotNil(service.lastResetCheckDate, "执行后应 set lastResetCheckDate")
+    }
+
+    // refreshIfNeeded 入口同样触发跨日重置 —— 这是修复"打开菜单仍显示昨天 digest"的关键路径
+    func testRefreshIfNeededTriggersCrossedDayReset() async {
+        let feed = seedFeed("https://f/feed")
+        rss.setSuccess(feed.url, [makeRaw("https://a/new")])
+
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+        service.lastRefreshDate = yesterday
+        service.dailyDigest = "昨天的摘要"
+        prefs.saveDigest(content: "昨天的摘要", date: yesterday)
+
+        await service.refreshIfNeeded()
+
+        // refreshIfNeeded → resetCrossedDayStateIfNeeded → 立即清空 dailyDigest
+        // 紧随 refresh() 触发；本测试关注的是 "打开瞬间 UI 已切到空" 这步
+        XCTAssertNil(prefs.digestContent, "prefs digest 应被跨日重置清空（即便 refresh 后未重新生成）")
     }
 }

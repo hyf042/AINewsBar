@@ -31,33 +31,54 @@ final class MockAI: AISummarizing, @unchecked Sendable {
     var recommendProvider: (@Sendable ([ArticleSnapshot.Item]) -> [UUID])?
     var digestProvider: (@Sendable ([ArticleSnapshot.Item]) -> String)?
 
+    // 默认 usage（zero）；需断言时测试侧覆盖
+    var summaryUsage: UsageInfo = .zero
+    var recommendUsage: UsageInfo = .zero
+    var digestUsage: UsageInfo = .zero
+
     // 错误注入
     var summaryError: Error?
     var recommendError: Error?
     var digestError: Error?
 
-    // 调用计数
-    var summaryCallCount = 0
-    var recommendCallCount = 0
-    var digestCallCount = 0
+    // 调用计数 —— SummaryPipeline 5 并发调 generateSummary，必须加锁保护
+    // （summary/recommend/digest provider 和 usage 在 setUp 后只读，无需加锁）
+    private let countLock = NSLock()
+    private var _summaryCallCount = 0
+    private var _recommendCallCount = 0
+    private var _digestCallCount = 0
 
-    func generateSummary(title: String, content: String?, apiKey: String, model: String) async throws -> String {
-        summaryCallCount += 1
+    var summaryCallCount: Int { countLock.withLock { _summaryCallCount } }
+    var recommendCallCount: Int { countLock.withLock { _recommendCallCount } }
+    var digestCallCount: Int { countLock.withLock { _digestCallCount } }
+
+    func generateSummary(title: String, content: String?, apiKey: String, model: String)
+        async throws -> (summary: String, usage: UsageInfo)
+    {
+        countLock.withLock { _summaryCallCount += 1 }
         if let e = summaryError { throw e }
-        return summaryProvider?(title, content) ?? "mock-summary-of-\(title)"
+        let text = summaryProvider?(title, content) ?? "mock-summary-of-\(title)"
+        return (text, summaryUsage)
     }
 
-    func recommendArticles(_ items: [ArticleSnapshot.Item], apiKey: String, model: String) async throws -> [UUID] {
-        recommendCallCount += 1
+    func recommendArticles(_ items: [ArticleSnapshot.Item], apiKey: String, model: String)
+        async throws -> (ids: [UUID], usage: UsageInfo)
+    {
+        countLock.withLock { _recommendCallCount += 1 }
         if let e = recommendError { throw e }
-        if let p = recommendProvider { return p(items) }
-        return Array(items.prefix(3).map(\.id))
+        let ids: [UUID]
+        if let p = recommendProvider { ids = p(items) }
+        else { ids = Array(items.prefix(3).map(\.id)) }
+        return (ids, recommendUsage)
     }
 
-    func generateDigest(items: [ArticleSnapshot.Item], apiKey: String, model: String) async throws -> String {
-        digestCallCount += 1
+    func generateDigest(items: [ArticleSnapshot.Item], apiKey: String, model: String)
+        async throws -> (content: String, usage: UsageInfo)
+    {
+        countLock.withLock { _digestCallCount += 1 }
         if let e = digestError { throw e }
-        return digestProvider?(items) ?? "mock-digest-\(items.count)"
+        let text = digestProvider?(items) ?? "mock-digest-\(items.count)"
+        return (text, digestUsage)
     }
 }
 
@@ -81,6 +102,9 @@ final class InMemoryPrefs: PreferencesStoring {
         digestContent = nil
         digestDate = nil
         digestArticleCount = 0
+    }
+
+    func clearRecommendState() {
         recommendArticleCount = 0
     }
 
@@ -93,4 +117,28 @@ final class InMemoryPrefs: PreferencesStoring {
     func saveDigestArticleCount(_ count: Int) { digestArticleCount = count }
     func loadRecommendArticleCount() -> Int { recommendArticleCount }
     func saveRecommendArticleCount(_ count: Int) { recommendArticleCount = count }
+}
+
+/// 测试用 UsageRecording —— 把每次 record 调用作为 RecordedEntry 累积，便于断言。
+@MainActor
+final class InMemoryUsageRecorder: UsageRecording {
+    struct Entry: Equatable {
+        let scene: UsageScene
+        let model: String
+        let input: Int
+        let output: Int
+        let success: Bool
+    }
+
+    private(set) var entries: [Entry] = []
+    private(set) var cleanupCalls: [Int] = []
+
+    func record(scene: UsageScene, model: String, input: Int, output: Int, success: Bool) {
+        entries.append(Entry(scene: scene, model: model,
+                              input: input, output: output, success: success))
+    }
+
+    func cleanupOlderThan(days: Int) {
+        cleanupCalls.append(days)
+    }
 }

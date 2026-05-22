@@ -7,6 +7,7 @@ import Foundation
 enum BailianError: Error, LocalizedError {
     case httpStatus(code: Int, bodySnippet: String)
     case malformedResponse(reason: String)
+    case insufficientCandidates(count: Int)
 
     var errorDescription: String? {
         switch self {
@@ -14,6 +15,8 @@ enum BailianError: Error, LocalizedError {
             return "HTTP \(code)：\(body)"
         case .malformedResponse(let reason):
             return "响应解析失败：\(reason)"
+        case .insufficientCandidates(let count):
+            return "候选不足（仅 \(count) 篇，至少需要 3 篇）"
         }
     }
 }
@@ -27,22 +30,35 @@ actor BailianService: AISummarizing {
         _ = try await chat(prompt: "1", maxTokens: 1, apiKey: apiKey, model: model)
     }
 
-    func generateSummary(title: String, content: String?, apiKey: String, model: String) async throws -> String {
+    func generateSummary(title: String, content: String?, apiKey: String, model: String)
+        async throws -> (summary: String, usage: UsageInfo)
+    {
         let prompt = Self.makeSummaryPrompt(title: title, content: content)
-        return try await chat(prompt: prompt, maxTokens: 150, apiKey: apiKey, model: model)
+        let (text, usage) = try await chat(prompt: prompt, maxTokens: 150, apiKey: apiKey, model: model)
+        return (text, usage)
     }
 
-    func recommendArticles(_ items: [ArticleSnapshot.Item], apiKey: String, model: String) async throws -> [UUID] {
-        guard items.count >= 3 else { return items.map(\.id) }
+    func recommendArticles(_ items: [ArticleSnapshot.Item], apiKey: String, model: String)
+        async throws -> (ids: [UUID], usage: UsageInfo)
+    {
+        // 候选不足时显式抛错，让 caller 走 aiAvailability=.unavailable 路径
+        // 不再退化为返回全部 id（旧逻辑会把含 nil-summary 的退化数据当推荐结果）
+        guard items.count >= 3 else {
+            throw BailianError.insufficientCandidates(count: items.count)
+        }
         let prompt = Self.makeRecommendPrompt(items: items)
-        let response = try await chat(prompt: prompt, maxTokens: 20, apiKey: apiKey, model: model)
-        return Self.parseRecommendResponse(response, totalCount: items.count)
+        let (response, usage) = try await chat(prompt: prompt, maxTokens: 20, apiKey: apiKey, model: model)
+        let ids = Self.parseRecommendResponse(response, totalCount: items.count)
             .map { items[$0 - 1].id }
+        return (ids, usage)
     }
 
-    func generateDigest(items: [ArticleSnapshot.Item], apiKey: String, model: String) async throws -> String {
+    func generateDigest(items: [ArticleSnapshot.Item], apiKey: String, model: String)
+        async throws -> (content: String, usage: UsageInfo)
+    {
         let prompt = Self.makeDigestPrompt(items: items)
-        return try await chat(prompt: prompt, maxTokens: 300, apiKey: apiKey, model: model)
+        let (text, usage) = try await chat(prompt: prompt, maxTokens: 300, apiKey: apiKey, model: model)
+        return (text, usage)
     }
 
     // MARK: - Prompt 构造（纯函数，可单测）
@@ -109,9 +125,19 @@ actor BailianService: AISummarizing {
         return result
     }
 
+    /// 从 DashScope 响应 JSON 中提取 usage；缺失/异常返回 .zero（不影响主流程）。
+    static func parseUsage(from json: [String: Any]?) -> UsageInfo {
+        guard let usage = json?["usage"] as? [String: Any] else { return .zero }
+        let input = (usage["prompt_tokens"] as? Int) ?? (usage["input_tokens"] as? Int) ?? 0
+        let output = (usage["completion_tokens"] as? Int) ?? (usage["output_tokens"] as? Int) ?? 0
+        return UsageInfo(inputTokens: max(0, input), outputTokens: max(0, output))
+    }
+
     // MARK: - HTTP
 
-    private func chat(prompt: String, maxTokens: Int, apiKey: String, model: String) async throws -> String {
+    private func chat(prompt: String, maxTokens: Int, apiKey: String, model: String)
+        async throws -> (content: String, usage: UsageInfo)
+    {
         let body: [String: Any] = [
             "model": model,
             "messages": [["role": "user", "content": prompt]],
@@ -141,6 +167,7 @@ actor BailianService: AISummarizing {
             throw BailianError.malformedResponse(reason: "missing choices[0].message.content")
         }
 
-        return content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let usage = Self.parseUsage(from: json)
+        return (content.trimmingCharacters(in: .whitespacesAndNewlines), usage)
     }
 }

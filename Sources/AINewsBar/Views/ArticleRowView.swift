@@ -13,7 +13,7 @@ struct ArticleRowView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(article.publishedAt, style: .relative)
+                Text(formatArticleRelative(article.publishedAt))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

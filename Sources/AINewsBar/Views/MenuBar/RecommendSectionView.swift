@@ -7,10 +7,13 @@ struct RecommendSectionView: View {
     @EnvironmentObject private var refreshService: RefreshService
 
     /// #4 优化：复用父视图 @Query 数据，按 id 内存查找并保序，O(n) 无 IO
+    /// 注意：用 uniquingKeysWith 而非 uniqueKeysWithValues —— SwiftData 容灾路径
+    /// (BuiltInFeeds.deduplicateArticles) 的存在证明历史曾出现过重复 Article id，
+    /// uniqueKeysWithValues 在重复 key 时会 fatalError 让推荐区直接崩溃
     private var picks: [Article] {
         let ids = refreshService.recommendedArticleIDs
         guard !ids.isEmpty else { return [] }
-        let byID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
+        let byID = Dictionary(articles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return ids.compactMap { byID[$0] }
     }
 
@@ -86,12 +89,11 @@ struct RecommendSectionView: View {
     }
 
     private var pickRows: some View {
+        // 不再用 Divider 分隔 —— 横线会在两项之间挤断左侧色条 1pt，
+        // 改由 RecommendItemView 自身的 vertical padding (6pt) 自然分隔
         ForEach(Array(picks.enumerated()), id: \.element.id) { index, article in
-            VStack(spacing: 0) {
-                RecommendItemView(index: index + 1, article: article) {
-                    onOpen(article)
-                }
-                if index < picks.count - 1 { Divider().padding(.leading, 34) }
+            RecommendItemView(index: index + 1, article: article) {
+                onOpen(article)
             }
         }
     }

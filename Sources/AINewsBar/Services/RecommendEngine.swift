@@ -7,6 +7,7 @@ struct RecommendEngine {
         let ids: [UUID]
         let generatedAt: Date
         let articleCount: Int
+        let usage: UsageInfo
     }
 
     let ai: any AISummarizing
@@ -19,12 +20,13 @@ struct RecommendEngine {
     ) async throws -> Outcome? {
         guard snapshot.all.count >= 3 else { return nil }
 
-        let ids = try await ai.recommendArticles(snapshot.all, apiKey: apiKey, model: model)
+        let (ids, usage) = try await ai.recommendArticles(snapshot.all, apiKey: apiKey, model: model)
         Log.write("[Recommend] picked \(ids.count) from \(snapshot.all.count) articles")
         return Outcome(
             ids: ids,
             generatedAt: Date(),
-            articleCount: snapshot.summarizedCount
+            articleCount: snapshot.summarizedCount,
+            usage: usage
         )
     }
 }

@@ -76,7 +76,8 @@ final class PreferencesServiceTests: XCTestCase {
                        date.timeIntervalSince1970, accuracy: 0.001)
     }
 
-    func testClearDigestRemovesAll() {
+    // P3: clearDigest 仅清日报相关 key，保留推荐计数
+    func testClearDigestRemovesOnlyDigestKeys() {
         prefs.saveDigest(content: "x", date: Date())
         prefs.saveDigestArticleCount(5)
         prefs.saveRecommendArticleCount(7)
@@ -84,6 +85,17 @@ final class PreferencesServiceTests: XCTestCase {
 
         XCTAssertNil(prefs.loadDigest())
         XCTAssertEqual(prefs.loadDigestArticleCount(), 0)
+        XCTAssertEqual(prefs.loadRecommendArticleCount(), 7, "clearDigest 不应触及推荐计数")
+    }
+
+    func testClearRecommendStateRemovesOnlyRecommendKeys() {
+        prefs.saveDigest(content: "x", date: Date())
+        prefs.saveDigestArticleCount(5)
+        prefs.saveRecommendArticleCount(7)
+        prefs.clearRecommendState()
+
+        XCTAssertNotNil(prefs.loadDigest(), "clearRecommendState 不应触及日报内容")
+        XCTAssertEqual(prefs.loadDigestArticleCount(), 5)
         XCTAssertEqual(prefs.loadRecommendArticleCount(), 0)
     }
 

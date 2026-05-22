@@ -40,12 +40,7 @@ struct MenuBarView: View {
             FooterView()
         }
         .frame(width: 380)
-        .task {
-            refreshService.configure(with: modelContext)
-            BuiltInFeeds.syncInto(context: modelContext)
-            refreshService.postUnreadCount(context: modelContext)
-            refreshService.launchBackgroundRefreshIfNeeded()
-        }
+        // startup 已在 AppDelegate.applicationDidFinishLaunching；view 出现时不再重复初始化
     }
 
     private var articleList: some View {

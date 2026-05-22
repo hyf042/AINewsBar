@@ -55,6 +55,10 @@ final class PreferencesService: PreferencesStoring {
         defaults.removeObject(forKey: digestContentKey)
         defaults.removeObject(forKey: digestDateKey)
         defaults.removeObject(forKey: digestArticleCountKey)
+    }
+
+    /// 仅清推荐相关状态。caller 显式决定是否调（跨日重置 vs 当日保留）。
+    func clearRecommendState() {
         defaults.removeObject(forKey: recommendArticleCountKey)
     }
 

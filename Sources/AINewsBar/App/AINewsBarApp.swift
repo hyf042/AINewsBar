@@ -6,35 +6,10 @@ struct AINewsBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var refreshService = RefreshService.shared
 
-    private let container: ModelContainer = {
-        let schema = Schema([Feed.self, Article.self])
-        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-        do {
-            let c = try ModelContainer(for: schema, configurations: config)
-            Log.write("ModelContainer created OK")
-            return c
-        } catch {
-            // 迁移失败时删除旧库重建（今日文章重新抓取即可）
-            Log.write("ModelContainer failed, resetting store: \(error)")
-            let base = URL.applicationSupportDirectory.appending(path: "default.store")
-            for suffix in ["", "-shm", "-wal"] {
-                let url = URL.applicationSupportDirectory.appending(path: "default.store\(suffix)")
-                try? FileManager.default.removeItem(at: url)
-            }
-            let c = try! ModelContainer(for: schema, configurations: config)
-            Log.write("ModelContainer recreated OK")
-            // 容灾去重：重建后理论上空库，此调用作为防御兜底（KISS 保留以便未来迁移场景）
-            Task { @MainActor in
-                BuiltInFeeds.deduplicateArticles(context: ModelContext(c))
-            }
-            return c
-        }
-    }()
-
     var body: some Scene {
         MenuBarExtra {
             MenuBarView()
-                .modelContainer(container)
+                .modelContainer(AppDelegate.container)
                 .environmentObject(refreshService)
         } label: {
             MenuBarLabel()
@@ -43,7 +18,7 @@ struct AINewsBarApp: App {
 
         Settings {
             SettingsView()
-                .modelContainer(container)
+                .modelContainer(AppDelegate.container)
                 .environmentObject(refreshService)
         }
     }

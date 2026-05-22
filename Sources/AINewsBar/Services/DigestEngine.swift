@@ -7,6 +7,7 @@ struct DigestEngine {
         let content: String
         let generatedAt: Date
         let articleCount: Int
+        let usage: UsageInfo
     }
 
     let ai: any AISummarizing
@@ -19,7 +20,7 @@ struct DigestEngine {
     ) async throws -> Outcome? {
         guard snapshot.summarizedCount >= 3 else { return nil }
 
-        let content = try await ai.generateDigest(
+        let (content, usage) = try await ai.generateDigest(
             items: snapshot.summarized,
             apiKey: apiKey,
             model: model
@@ -28,7 +29,8 @@ struct DigestEngine {
         return Outcome(
             content: content,
             generatedAt: Date(),
-            articleCount: snapshot.summarizedCount
+            articleCount: snapshot.summarizedCount,
+            usage: usage
         )
     }
 }

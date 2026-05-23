@@ -1,10 +1,31 @@
-# UI 样式打磨设计文档（v2）
+# UI 样式打磨设计文档（v3）
 
 **日期**: 2026-05-23
 **类型**: 视觉优化（typography / color token 化）
 **范围**: 全 app（菜单栏 popover + 设置页）
 **前置约束**: 排版（padding/spacing/layout）尽量不变
-**版本**: v2（基于 architect agent 第一轮 review 修订 P1 全集）
+**版本**: v3（基于 architect agent 第二轮 review 修订）
+
+---
+
+## 0.1 v3 修订要点（vs v2）
+
+| # | v2 问题（第二轮 review 发现） | v3 修复 |
+|---|--------|--------|
+| 0.1-1 | **P1-3 根本冲突**：ArticleListSection `listHeight: 52` 写死与 Typography relative font 互斥，Dynamic Type 大字号下行内容会撑高被截断 | **ArticleRowView 字号回到 fixed size**：`Font.system(size:13)` 替代 `Typography.titleEmphasized/body`；listHeight=52 保留。**ArticleRow 明确放弃 Dynamic Type 响应**，其他 view 仍 relative。Trade-off 记录到 R6/§7 |
+| 0.1-2 | **P1-2 BrandColor.surfaceMuted opacity 0.04 在 List 上经合成层 alpha 被吞，浅色几乎不可见** | opacity 0.04 → **0.06**（多 50% 可见度），仍用 `Color.primary.opacity` 路径（与 accent NSColor dynamicProvider 路径不一致是"背景 vs 品牌"语义区别的合理后果） |
+| 0.1-3 | **P1-1 SwiftUI Color 桥接深层问题**：`Color(nsColor: NSColor.dynamicProvider)` 在 popover detached 重开时不一定重新求值 dynamicProvider | **接受为 R9 已知风险**：菜单栏 popover 关开是 full view rebuild 场景，初始采样问题实际不易触发。验收 §6.2 加显式走查项观测 |
+| 0.1-4 | macOS `Font.headline` 实测是 13pt **bold**（不是 semibold），与 `titleEmphasized = .body + semibold` **字重不一致** | §2.1 注释修正 headline 描述为"13pt bold"；明确接受 hero 与文章标题字重存在 1 档差异（bold > semibold）作为"hero 强调"语义信号 |
+| 0.1-5 | `Typography.caption.weight(.bold)` 在 relative font 上 bold trait 可能回落到 semibold | 新增 `Typography.captionEmphasized = Font.system(.caption2, weight: .bold)`，RecommendItem.index 与 placeholderRows 改用此 token |
+| 0.1-6 | DesignTokensTests 极简（`!= nil` 永真）形同虚设 | §4 Phase 1 单测加 dynamic provider 双值测试：通过 NSColor.dynamicProvider 强制构造 .aqua / .darkAqua 两个 appearance，验证返回不同 NSColor |
+| 0.1-7 | §4 Phase 4 grep 漏扫 `Color\.secondary` / `Color\.primary` / `Font\.body` / `Font\.callout` 等 | grep pattern 列表补全 |
+| 0.1-8 | §7.1 防 creep 边界缺 `ArticleListSection` "已读 (n)" 分隔行 `listRowBackground` 与 Charts 字号 | §7.1 显式增加 2 条边界 |
+| 0.1-9 | §6.2 "运行时切换 Appearance" 走查步骤不具体（保持 popover 打开 vs 关闭再开行为差异是 R9 关键观测点） | §6.2 R9 走查步骤拆为 2 个子项（关闭再开 + 保持打开） |
+| 0.1-10 | §3.2 "plain style 时文字色用 BrandColor.accent" 语焉不详 | §3.2 显式列出哪些按钮属 `.buttonStyle(.plain)`，跟随 BrandColor；其他按钮（系统主样式）跟随系统强调色 |
+
+**未修复（明确权衡）**：
+- P1-1 SwiftUI Color 桥接深层问题：在 SwiftUI + macOS 14 范畴内几乎无解（弃用 Color 改 ShapeStyle inline 是过度工程）。接受 R9 + 验收走查
+- P1-2 surfaceMuted 与 accent 路径不一致：故意保留作为"背景 vs 品牌"语义区别
 
 ---
 
@@ -75,18 +96,22 @@ import SwiftUI
 /// 不使用 `Font.system(size:)` 固定字号，避免降级 Dynamic Type 可访问性。
 enum Typography {
     /// HeaderView 顶部 hero（"AI 资讯 [n/N]"）。
-    /// macOS 默认 ~13pt semibold（与 body 同尺寸 + 加重）。
+    /// macOS 默认 ~13pt **bold**（注意：是 bold 不是 semibold，与 titleEmphasized 字重差 1 档）。
+    /// 字重差异是 "hero 强调" 的语义信号，刻意保留。
     static let headline = Font.headline
 
     /// UsageSettings 统计卡片大数字（"今日 X tokens" 等）。
     /// macOS 默认 ~22pt，rounded 设计强化数字识别。
     static let stat = Font.system(.title, design: .rounded, weight: .semibold)
 
-    /// 文章未读标题、推荐项 13pt 标题加重。
+    /// 推荐项 13pt 标题加重（仅在 RecommendItem 13pt 场景使用——目前未使用，
+    /// 保留语义槽位以备 ArticleRow 之外的 13pt semibold 标题需求）。
     /// macOS 默认 ~13pt semibold。
+    /// 注：ArticleRowView 因 listHeight=52 写死 + Dynamic Type 互斥（见 v3 修订 0.1-1），
+    /// 使用 fixed `Font.system(size:13, weight:.semibold/.regular)` 不走此 token。
     static let titleEmphasized = Font.system(.body, weight: .semibold)
 
-    /// 正文、摘要、文章已读标题。
+    /// 正文、摘要。
     /// macOS 默认 ~13pt regular。
     static let body = Font.body
 
@@ -101,6 +126,11 @@ enum Typography {
     /// 区域标签、feed 名、相对时间、辅助状态、"已读 (n)" 分隔行、chevron 等。
     /// macOS 默认 ~10pt regular。
     static let caption = Font.caption2
+
+    /// 加重的 caption（RecommendItem.index 数字未读态、placeholderRows index）。
+    /// 替代原 `caption.weight(.bold)` 调用——relative font 上 weight modifier
+    /// 对 bold trait 可能回落到 semibold，定义专用 token 锁定渲染。
+    static let captionEmphasized = Font.system(.caption2, weight: .bold)
 }
 ```
 
@@ -184,8 +214,11 @@ enum BrandColor {
     }()
 
     /// 区域柔和背景（替换 `.background(.quaternary)`）。
-    /// SwiftUI 语义颜色自动适配（light: 黑 4% / dark: 白 4%）。
-    static let surfaceMuted = Color.primary.opacity(0.04)
+    /// SwiftUI 语义颜色自动适配（light: 黑 6% / dark: 白 6%）。
+    /// v3 修订：opacity 0.04 → 0.06，避免 List 合成层 alpha 吞掉后浅色不可见。
+    /// 与 accent/accentSoft 的 NSColor dynamicProvider 路径不一致——
+    /// 这是 "背景 vs 品牌" 语义区别的合理后果，不是 bug。
+    static let surfaceMuted = Color.primary.opacity(0.06)
 }
 ```
 
@@ -260,7 +293,7 @@ enum BrandColor {
 
 | 元素 | 原 | 新 |
 |------|----|----|
-| placeholder index 数字 | `.system(size:11, weight:.bold)` + `.tertiary` | `Typography.caption.weight(.bold)` + `TextColor.tertiary` |
+| placeholder index 数字 | `.system(size:11, weight:.bold)` + `.tertiary` | `Typography.captionEmphasized` + `TextColor.tertiary` |
 | 骨架条 RoundedRectangle fill | `Color.secondary.opacity(0.12)` | **保留**（已是语义合理的占位） |
 | Divider | `Divider().padding(.leading, 34)` | **保留**（placeholderRows 与 pickRows 不同——placeholder 没有色条，divider 不会切断） |
 
@@ -272,7 +305,7 @@ enum BrandColor {
 |------|----|----|
 | 左色条 (未读) | `Rectangle().fill(Color.orange).frame(width:3)` | `Rectangle().fill(BrandColor.accent).frame(width:3)` |
 | 左色条 (已读) | `Color.clear.frame(width:3)` | **保留透明占位**（防 §6.3 色条贯穿断裂踩坑 #20 复发） |
-| index 数字 (未读) | `.system(size:11, weight:.bold)` + `Color.orange` | `Typography.caption.weight(.bold)` + `BrandColor.accent` |
+| index 数字 (未读) | `.system(size:11, weight:.bold)` + `Color.orange` | `Typography.captionEmphasized` + `BrandColor.accent` |
 | index 数字 (已读) | `.system(size:11, weight:.regular)` + `.tertiary` | `Typography.caption` + `TextColor.tertiary` |
 | feed 名 + 时间 | `.caption2` + `.tertiary` | `Typography.caption` + `TextColor.tertiary` |
 | 标题 (未读) | `.system(size:12, weight:.semibold)` + `.primary` | `Typography.calloutEmphasized` + `TextColor.primary` |
@@ -310,12 +343,17 @@ enum BrandColor {
 
 #### `ArticleRowView` (`Sources/AINewsBar/Views/ArticleRowView.swift`)
 
+> **特殊例外**：因 `ArticleListSection.listHeight = 52` 写死与 Typography relative font 互斥（v3 修订 0.1-1），
+> 本 view 的**标题字号保留 fixed `Font.system(size:13)`**，**不进 Typography token**。
+> 已读/未读 weight 直接 inline 表达。其他字段（feedTitle/时间/摘要）仍走 Typography token（小字段行高变化对 listHeight 影响小）。
+> 该 view **明确放弃 Dynamic Type 响应**，作为已知 a11y trade-off 记录到 §5 R6。
+
 | 元素 | 原 | 新 |
 |------|----|----|
 | feedTitle | `.caption2` + `.secondary` | `Typography.caption` + `TextColor.tertiary` **（一致性修复：secondary → tertiary）** |
 | 时间 | `.caption2` + `.secondary` | `Typography.caption` + `TextColor.tertiary` **（一致性修复）** |
-| 标题 (未读) | `.system(size:13, weight:.semibold)` + `.primary` | `Typography.titleEmphasized` + `TextColor.primary` |
-| 标题 (已读) | `.system(size:13, weight:.regular)` + `.secondary` | `Typography.body` + `TextColor.secondary` |
+| 标题 (未读) | `.system(size:13, weight:.semibold)` + `.primary` | **保留 fixed** `Font.system(size:13, weight:.semibold)` + `TextColor.primary` |
+| 标题 (已读) | `.system(size:13, weight:.regular)` + `.secondary` | **保留 fixed** `Font.system(size:13, weight:.regular)` + `TextColor.secondary` |
 | 摘要 | `.caption` + `.secondary` | `Typography.caption` + `TextColor.secondary` |
 | **去掉行底色** | `background(article.isRead ? .clear : Color.accentColor.opacity(0.05))` | **删除** |
 | **新增 leading dot** | （无） | `Circle().fill(article.isRead ? .clear : BrandColor.accent).frame(width:4, height:4).padding(.top, 5)` |
@@ -404,9 +442,18 @@ enum BrandColor {
 
 1. 新建 `Sources/AINewsBar/DesignTokens/` 目录
 2. 写 `Typography.swift` / `TextColor.swift` / `BrandColor.swift` 三个文件
-3. **新增单测** `Tests/AINewsBarTests/DesignTokensTests.swift`：
-   - `#expect(Typography.headline != nil)` 类基本值校验
-   - `#expect(BrandColor.accent != Color.clear)` 防误删
+3. **新增单测** `Tests/AINewsBarTests/DesignTokensTests.swift`，覆盖：
+   - Typography token 实例化非 crash（不仅是 `!= nil`，因 Font 是非可选）：例如 `let _ = Typography.headline; #expect(true)` 至少证明运行时构造无副作用
+   - BrandColor dynamic provider 在两种 appearance 下返回不同 NSColor：
+     ```swift
+     let aquaColor = nsColorFor(appearance: .aqua, in: BrandColor.accent)
+     let darkColor = nsColorFor(appearance: .darkAqua, in: BrandColor.accent)
+     #expect(aquaColor.redComponent != darkColor.redComponent ||
+             aquaColor.blueComponent != darkColor.blueComponent)
+     ```
+     辅助函数 `nsColorFor(appearance:in:)` 通过 `NSAppearance(named:)` 切换 currentDrawing 后读取实际 RGB
+   - BrandColor.accentSoft 同上验证双值
+   - Typography.stat token 存在性（防误删）
 4. `swift build && swift test` 通过
 5. Commit：`feat(tokens): 引入 Typography/TextColor/BrandColor 三套 token`
 
@@ -425,18 +472,30 @@ enum BrandColor {
 
 ### Phase 4 — 收尾验证（~0.5 单元）
 
-1. **完整 grep 扫描遗漏**：
+1. **完整 grep 扫描遗漏**（Font / Color / 系统强调色三类）：
    ```bash
-   rg "\.system\(size:" Sources/
-   rg "\.caption2\b" Sources/
-   rg "\.caption\b" Sources/
-   rg "\.footnote" Sources/
-   rg "\.headline" Sources/
-   rg "Color\.orange" Sources/
-   rg "\.quaternary" Sources/
-   rg "Color\.accentColor" Sources/
+   # Font 散点
+   rg "\.system\(size:" Sources/AINewsBar/Views/   # 应仅在 ArticleRowView (fixed 13pt 例外) 出现
+   rg "\.caption2\b" Sources/AINewsBar/Views/
+   rg "\.caption\b" Sources/AINewsBar/Views/
+   rg "\.footnote" Sources/AINewsBar/Views/
+   rg "\.headline" Sources/AINewsBar/Views/
+   rg "Font\.body\b" Sources/AINewsBar/Views/
+   rg "Font\.callout\b" Sources/AINewsBar/Views/
+
+   # Color 散点
+   rg "Color\.orange" Sources/AINewsBar/Views/
+   rg "Color\.primary\b" Sources/AINewsBar/Views/        # 应在 TextColor.primary 后清空
+   rg "Color\.secondary\b" Sources/AINewsBar/Views/      # 应在 TextColor.secondary 后清空
+   rg "\.tertiary\b" Sources/AINewsBar/Views/            # foregroundStyle(.tertiary) 应替换为 TextColor.tertiary
+   rg "Color\.accentColor" Sources/AINewsBar/Views/
+   rg "\.quaternary" Sources/AINewsBar/Views/            # 应清零
    ```
-   所有结果应仅在 `DesignTokens/` 与 SettingsView 系统组件内出现
+   **预期结果**：
+   - `ArticleRowView.swift` 保留 1-2 处 `.system(size:13)`（已知 exception 见 §3.1 注释）
+   - `SettingsView.swift` 系统 TabView / Picker / Form 保留原生调用
+   - `UsageSettingsView.swift` Charts 部分保留 SwiftUI Charts 默认调用
+   - `CheckStatus.swift` 绿/红/灰语义色保留
 2. CLAUDE.md 增量更新（新增 DesignTokens 目录说明 + 设计决策 token 化条目）
 3. `swift test` 全 140 测试 + 新增 token 单测通过
 4. 启动验证 + push
@@ -454,10 +513,10 @@ enum BrandColor {
 | R3 | `Color.primary.opacity(0.04)` 某些显示器/系统配色偏暗 | 低 | 0.04 是肉眼几乎不可感的极淡值，必要时降至 0.03 |
 | R4 | 全 app 改 ~19 文件，引入新隐性回归 | 低 | View 层无业务逻辑，单元测试不受影响；手动走查覆盖关键状态 |
 | R5 | ArticleRow HStack 结构改动可能影响 List 行高（`listHeight: 52`） | 中 | dot padding 控制在 ±2pt 内；listHeight 算法需 verify，必要时调整常量 |
-| **R6** | **Dynamic Type / macOS System Settings Text Size 切换**——token 全 relative font 跟随系统，但极大/极小档下版面可能错位 | 中 | §6.2 验收加 3 档 Dynamic Type 走查（small / large / xx-large） |
-| **R7** | **`.background(BrandColor.surfaceMuted)` 与 List `listRowBackground` 叠加视觉怪异**——踩坑 #1 已记录 List 在 MenuBarExtra 渲染问题 | 中 | §6.2 必走查 ArticleListSection 展开后浅/深两模式，`listRowBackground` 与外层 surfaceMuted 0.04 透明叠加是否产生视觉杂色 |
+| **R6** | **Dynamic Type / macOS System Settings Text Size 切换** | 中 | v3：ArticleRow 字号已 fixed（已知放弃），其他 view（Digest/Recommend/Settings）relative font 仍响应 Dynamic Type。§6.2 验收走查 3 档（small / large / xx-large），ArticleListSection 区域接受不响应作为已知 trade-off |
+| **R7** | **`.background(BrandColor.surfaceMuted)` 与 List `listRowBackground` 叠加视觉怪异**——踩坑 #1 已记录 List 在 MenuBarExtra 渲染问题 | 中 | §6.2 必走查 ArticleListSection 展开后浅/深两模式，`listRowBackground` 与外层 surfaceMuted 0.06 透明叠加是否产生视觉杂色（v3 已把 opacity 从 0.04 提到 0.06） |
 | **R8** | **系统强调色（用户在 System Settings 改 accent）vs BrandColor 共存**——AddFeedSheet 系统按钮跟系统强调色，与菜单栏 BrandColor 橙并列可能突兀 | 中 | §6.2 加"切换系统强调色为非橙（如红/紫）"走查项 |
-| **R9** | **Light/Dark 实时切换 popover dynamicProvider 缓存**——macOS popover detached 时 NSColor dynamic 偶有缓存问题 | 低 | §6.2 加"运行时切换 Appearance"走查项；如果出现可改用 `@Environment(\.colorScheme)` 主动 invalidate |
+| **R9** | **SwiftUI Color 包装 NSColor.dynamicProvider 的初始采样问题**——SwiftUI Color 在创建时仅采样一次 NSColor，popover detached 重开时 dynamicProvider 不一定重新求值（第二轮 review P1-1 揭示） | 中 | **接受为已知风险**：菜单栏 popover 关开是 full view rebuild，初始采样问题实际不易触发。§6.2 加 2 个子项观测（保持打开 vs 关闭再开切 Appearance）。若实测频繁触发再考虑 `@Environment(\.colorScheme)` 主动 invalidate 重构 |
 | **R10** | **sRGB vs P3 色空间显示器差异**——Wide Color 显示器（如 MBP / Studio Display）下原生 RGB 偏色 | 低 | §2.3 已显式声明 `srgbRed:green:blue:` 锁定 sRGB 色空间 |
 
 ### 5.2 回滚
@@ -498,13 +557,14 @@ enum BrandColor {
 - [ ] 通用 Tab：开机启动 Toggle 字号对齐
 
 **Dynamic Type / 可访问性走查（R6 验证）**：
-- [ ] System Settings → Appearance → Text Size 切到 Large：所有 view 字号变化协调
+- [ ] System Settings → Appearance → Text Size 切到 Large：DigestSectionView / RecommendItem / Settings 4 Tab 字号变化协调
+- [ ] **ArticleListSection 文章行字号不变化**（已知 trade-off）
 - [ ] 切到 Default：恢复正常
 - [ ] 切到 Largest：版面溢出可控（不要求完美，但不能内容截断）
 
-**Light/Dark 实时切换（R9 验证）**：
-- [ ] 应用打开状态下，System Settings → Appearance 切 Light/Dark
-- [ ] 菜单栏 popover 关闭再打开：所有 BrandColor.accent / accentSoft / surfaceMuted 跟随新模式
+**Light/Dark 实时切换（R9 验证，2 个子项观测 SwiftUI Color 初始采样）**：
+- [ ] **子项 A（关闭再开）**：菜单栏 popover 关闭 → System Settings 切 Appearance（Light/Dark） → 重新点击图标打开 popover → 所有 BrandColor.accent / accentSoft / surfaceMuted 跟随新模式（**预期通过**：full view rebuild）
+- [ ] **子项 B（保持打开）**：菜单栏 popover 打开 → 在 popover 内可视范围内切 Appearance（如通过 Shortcuts / Touch Bar / Control Center） → 观察 popover 内 BrandColor 是否跟随。**已知风险**：可能不更新需关开 popover，若触发则在 CLAUDE.md 踩坑加 #32 + 后续单独迭代 `@Environment(\.colorScheme)` 重构
 
 **系统强调色冲突（R8 验证）**：
 - [ ] System Settings → Appearance → Highlight color 切到非橙色（如紫色）
@@ -549,6 +609,20 @@ enum BrandColor {
 - **`MenuBarView.body`** 与 `openArticle` 函数不动——仅修改 `aiUnavailableBanner` 内 Text/Image 元素
 - **`HeaderView` 顶部"AI 资讯 [n/N]"括号格式**不动——只替换 font/color modifier
 - **`FooterView` 时间格式 `.dateTime.hour().minute().second()`** 不动——只替换 font/color
+- **`ArticleListSection.articleList` "已读 (n)" 分隔行 `listRowBackground`**（`Color(nsColor: .separatorColor).opacity(0.12)`）保留——macOS 原生系统色已自动适配明暗，不替换为 BrandColor；R7 走查仅验证视觉叠加无杂色
+- **`UsageSettingsView` 内 SwiftUI Charts 字号/颜色/网格线**不动——保留 Charts framework 默认渲染，仅卡片头部/标签替换 Typography token
+- **`SettingsView` TabView 容器 / Tab label / Tab icon**不动——保留 macOS 系统 Settings 原生样式
+- **`ArticleRowView` HStack 改造**仅添加 leading dot + 移除背景色——不动 VStack 内部 spacing/lineLimit/onTapGesture/onHover 逻辑
+
+### 7.2 §3.2 button style 跟随规则补充
+
+| Button | 类别 | 文字色规则 |
+|--------|------|----------|
+| `FeedsSettingsView` "检测" / "检测全部" | `.buttonStyle(.plain)` | `BrandColor.accent`（跟品牌） |
+| `APISettingsView` "检测可用性" | `.buttonStyle(.plain)` | `BrandColor.accent`（跟品牌） |
+| `AddFeedSheet` "保存" / "取消" | 系统主样式（无 `.buttonStyle`） | 跟系统 accentColor（用户系统强调色） |
+| `MenuBarView.aiUnavailableBanner` "去设置" | `.buttonStyle(.plain)` | `BrandColor.accent`（跟品牌） |
+| `FooterView` "⚠ N 个源失败" / "设置" / "退出" | `.buttonStyle(.plain)` | 各自定义（见 §3.1） |
 
 ---
 
@@ -565,6 +639,6 @@ enum BrandColor {
 
 ---
 
-**作者**: Claude (via `/grill-me` 8 轮访谈 + architect review 1 轮)
-**审阅**: 待 architect agent 第二轮 review 与用户确认
-**版本**: v2 (2026-05-23)
+**作者**: Claude (via `/grill-me` 8 轮访谈 + architect review 2 轮)
+**审阅**: 待用户最终确认 (v3 已完成 architect 两轮 review 迭代)
+**版本**: v3 (2026-05-23)

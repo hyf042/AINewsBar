@@ -18,7 +18,9 @@ struct RecommendEngine {
         apiKey: String,
         model: String
     ) async throws -> Outcome? {
-        guard snapshot.all.count >= 3 else { return nil }
+        // 与 BailianService.recommendArticles 内部 guard 阈值保持一致（5 篇）
+        // 前置 guard 避免无谓 LLM 调用；推荐展示数从 3 升 5 后同步抬升
+        guard snapshot.all.count >= 5 else { return nil }
 
         let (ids, usage) = try await ai.recommendArticles(snapshot.all, apiKey: apiKey, model: model)
         Log.write("[Recommend] picked \(ids.count) from \(snapshot.all.count) articles")

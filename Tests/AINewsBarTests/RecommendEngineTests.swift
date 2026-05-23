@@ -27,7 +27,7 @@ final class RecommendEngineTests: XCTestCase {
     }
 
     // 决策已移至 RefreshService（由 RefreshDecisionTests 覆盖）；
-    // Engine 在此只测：执行 + "<3 → nil" 数据完整性保护 + AI 错误透传
+    // Engine 在此只测：执行 + "<5 → nil" 数据完整性保护 + AI 错误透传
 
     func testRunsWhenEnoughArticles() async throws {
         let outcome = try await engine.run(snapshot: snap(count: 5),
@@ -36,10 +36,11 @@ final class RecommendEngineTests: XCTestCase {
         XCTAssertEqual(ai.recommendCallCount, 1)
     }
 
-    func testReturnsNilBelow3Articles() async throws {
-        let outcome = try await engine.run(snapshot: snap(count: 2),
+    func testReturnsNilBelow5Articles() async throws {
+        // 推荐展示数从 3 升 5，候选阈值同步提升
+        let outcome = try await engine.run(snapshot: snap(count: 4),
                                             apiKey: "k", model: "m")
-        XCTAssertNil(outcome, "<3 篇文章不应调 AI")
+        XCTAssertNil(outcome, "<5 篇文章不应调 AI")
         XCTAssertEqual(ai.recommendCallCount, 0)
     }
 
@@ -55,9 +56,9 @@ final class RecommendEngineTests: XCTestCase {
     }
 
     func testOutcomeCarriesSummarizedCount() async throws {
-        let s = snap(count: 5, summarized: 3)
+        let s = snap(count: 6, summarized: 4)
         let outcome = try await engine.run(snapshot: s,
                                             apiKey: "k", model: "m")
-        XCTAssertEqual(outcome?.articleCount, 3, "articleCount 应为有摘要的数量")
+        XCTAssertEqual(outcome?.articleCount, 4, "articleCount 应为有摘要的数量")
     }
 }

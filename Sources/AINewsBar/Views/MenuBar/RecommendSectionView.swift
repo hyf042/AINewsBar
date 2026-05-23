@@ -70,7 +70,7 @@ struct RecommendSectionView: View {
     }
 
     private var placeholderRows: some View {
-        ForEach([1, 2, 3], id: \.self) { i in
+        ForEach([1, 2, 3, 4, 5], id: \.self) { i in
             VStack(spacing: 0) {
                 HStack(alignment: .top, spacing: 8) {
                     Text("\(i)")
@@ -83,7 +83,7 @@ struct RecommendSectionView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
-                if i < 3 { Divider().padding(.leading, 34) }
+                if i < 5 { Divider().padding(.leading, 34) }
             }
         }
     }

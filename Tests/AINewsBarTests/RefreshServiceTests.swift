@@ -195,15 +195,16 @@ final class RefreshServiceTests: XCTestCase {
     // MARK: - Recommend / Digest 触发
 
     func testRefreshGeneratesRecommendAndDigestWhenEnoughArticles() async {
+        // 推荐展示数从 3 升 5：候选阈值同步抬到 5，因此种 5 篇才能同时触发推荐 + 日报
         let feed = seedFeed("https://f1.com/feed")
-        rss.setSuccess(feed.url, (1...3).map { makeRaw("https://a/\($0)", title: "T\($0)") })
+        rss.setSuccess(feed.url, (1...5).map { makeRaw("https://a/\($0)", title: "T\($0)") })
 
         await service.refresh()
 
         XCTAssertEqual(ai.recommendCallCount, 1)
         XCTAssertEqual(ai.digestCallCount, 1)
         XCTAssertNotNil(service.dailyDigest)
-        XCTAssertEqual(service.recommendedArticleIDs.count, 3)
+        XCTAssertEqual(service.recommendedArticleIDs.count, 5)
     }
 
     func testRefreshSkipsDigestBelow3Articles() async {
@@ -213,7 +214,7 @@ final class RefreshServiceTests: XCTestCase {
         await service.refresh()
 
         XCTAssertEqual(ai.digestCallCount, 0, "少于 3 篇有摘要的文章时不生成日报")
-        XCTAssertEqual(ai.recommendCallCount, 0, "少于 3 篇时不生成推荐")
+        XCTAssertEqual(ai.recommendCallCount, 0, "少于 5 篇时不生成推荐（2 < 3 < 5 自然满足）")
     }
 
     // MARK: - Force regenerate
@@ -250,14 +251,15 @@ final class RefreshServiceTests: XCTestCase {
         }
     }
 
-    func testForceRegenerateRecommendBelow3Articles() async {
+    func testForceRegenerateRecommendBelow5Articles() async {
+        // 候选阈值升 5 后，force regen 同样需 ≥ 5 篇才能调 AI
         let feed = seedFeed("https://f1.com/feed")
-        rss.setSuccess(feed.url, [makeRaw("https://a/1"), makeRaw("https://a/2")])
+        rss.setSuccess(feed.url, (1...4).map { makeRaw("https://a/\($0)", title: "T\($0)") })
         await service.refresh()
         let before = ai.recommendCallCount
 
         await service.forceRegenerateRecommend()
-        XCTAssertEqual(ai.recommendCallCount, before, "少于 3 篇时不应调 AI")
+        XCTAssertEqual(ai.recommendCallCount, before, "少于 5 篇时不应调 AI")
     }
 
     // MARK: - Cleanup
@@ -293,8 +295,9 @@ final class RefreshServiceTests: XCTestCase {
     }
 
     func testRefreshHandlesAIErrors() async {
+        // 推荐候选阈值升 5：失败路径也需种 ≥ 5 篇才能让 recommend 真正被调用并报错
         let feed = seedFeed("https://f1.com/feed")
-        rss.setSuccess(feed.url, (1...3).map { makeRaw("https://a/\($0)", title: "T\($0)") })
+        rss.setSuccess(feed.url, (1...5).map { makeRaw("https://a/\($0)", title: "T\($0)") })
         ai.recommendError = URLError(.timedOut)
 
         await service.refresh()

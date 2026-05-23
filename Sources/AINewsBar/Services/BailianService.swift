@@ -16,7 +16,7 @@ enum BailianError: Error, LocalizedError {
         case .malformedResponse(let reason):
             return "响应解析失败：\(reason)"
         case .insufficientCandidates(let count):
-            return "候选不足（仅 \(count) 篇，至少需要 3 篇）"
+            return "候选不足（仅 \(count) 篇，至少需要 5 篇）"
         }
     }
 }
@@ -43,11 +43,12 @@ actor BailianService: AISummarizing {
     {
         // 候选不足时显式抛错，让 caller 走 aiAvailability=.unavailable 路径
         // 不再退化为返回全部 id（旧逻辑会把含 nil-summary 的退化数据当推荐结果）
-        guard items.count >= 3 else {
+        guard items.count >= 5 else {
             throw BailianError.insufficientCandidates(count: items.count)
         }
         let prompt = Self.makeRecommendPrompt(items: items)
-        let (response, usage) = try await chat(prompt: prompt, maxTokens: 20, apiKey: apiKey, model: model)
+        // maxTokens 30：5 个 1-2 位数序号 + 4 个分隔符 ≈ 14 字符；留 ~2 倍冗余兼容模型偶发啰嗦
+        let (response, usage) = try await chat(prompt: prompt, maxTokens: 30, apiKey: apiKey, model: model)
         let ids = Self.parseRecommendResponse(response, totalCount: items.count)
             .map { items[$0 - 1].id }
         return (ids, usage)
@@ -82,8 +83,9 @@ actor BailianService: AISummarizing {
             .joined(separator: "\n")
 
         return """
-        以下是今日 AI 资讯列表（标题｜摘要），请从中挑选3篇最值得阅读的文章。\
-        只返回序号，用英文逗号分隔，不要其他内容，例如：2,7,15
+        以下是今日 AI 资讯列表（标题｜摘要），请从中挑选 5 篇最值得阅读的文章，\
+        并按推荐度由高到低排序。\
+        只返回序号，用英文逗号分隔，不要其他内容，例如：7,2,15,9,4
 
         \(list)
         """
@@ -109,7 +111,8 @@ actor BailianService: AISummarizing {
     /// 支持的分隔符：英文逗号 / 中文逗号 / 顿号 / 空格 / 换行 / Tab
     static let indexSeparators = CharacterSet(charactersIn: ",，、 \n\t")
 
-    /// 解析模型返回的序号串。返回 1-based 序号数组，保序去重，越界过滤，最多 3 个。
+    /// 解析模型返回的序号串。返回 1-based 序号数组，保序去重，越界过滤，最多 5 个。
+    /// 模型按推荐度由高到低返回，因此保序即推荐度排序。
     static func parseRecommendResponse(_ response: String, totalCount: Int) -> [Int] {
         let parts = response.components(separatedBy: indexSeparators)
         var seen = Set<Int>()
@@ -120,7 +123,7 @@ actor BailianService: AISummarizing {
                   !seen.contains(n) else { continue }
             seen.insert(n)
             result.append(n)
-            if result.count == 3 { break }
+            if result.count == 5 { break }
         }
         return result
     }

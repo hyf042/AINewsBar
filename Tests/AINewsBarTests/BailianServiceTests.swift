@@ -37,15 +37,16 @@ final class BailianServiceTests: XCTestCase {
         XCTAssertEqual(result, [3, 4])
     }
 
-    func testParsePicksAtMostThree() {
-        let result = BailianService.parseRecommendResponse("1,2,3,4,5", totalCount: 20)
-        XCTAssertEqual(result, [1, 2, 3])
+    func testParsePicksAtMostFive() {
+        // 推荐展示数 3 → 5：parser cap 同步抬升
+        let result = BailianService.parseRecommendResponse("1,2,3,4,5,6,7", totalCount: 20)
+        XCTAssertEqual(result, [1, 2, 3, 4, 5])
     }
 
-    func testParseAfterDedupStillThree() {
-        // C1 边界：去重前 5 个，去重后还有 5 个，仍 cap 在 3
-        let result = BailianService.parseRecommendResponse("1,2,1,3,4,5", totalCount: 20)
-        XCTAssertEqual(result, [1, 2, 3])
+    func testParseAfterDedupStillFive() {
+        // C1 边界：去重前 7 个含 1 个重复，去重后 6 个，仍 cap 在 5
+        let result = BailianService.parseRecommendResponse("1,2,1,3,4,5,6", totalCount: 20)
+        XCTAssertEqual(result, [1, 2, 3, 4, 5])
     }
 
     func testParseDedupReducesBelowThree() {
@@ -105,7 +106,8 @@ final class BailianServiceTests: XCTestCase {
         XCTAssertTrue(prompt.contains("1. A"))
         XCTAssertTrue(prompt.contains("2. B"))
         XCTAssertTrue(prompt.contains("3. C"))
-        XCTAssertTrue(prompt.contains("挑选3篇"))
+        XCTAssertTrue(prompt.contains("挑选 5 篇"))
+        XCTAssertTrue(prompt.contains("按推荐度由高到低"), "prompt 应显式要求按推荐度排序")
     }
 
     func testRecommendPromptCapsAt50() {

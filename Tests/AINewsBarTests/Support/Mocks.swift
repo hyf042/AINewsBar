@@ -68,7 +68,7 @@ final class MockAI: AISummarizing, @unchecked Sendable {
         if let e = recommendError { throw e }
         let ids: [UUID]
         if let p = recommendProvider { ids = p(items) }
-        else { ids = Array(items.prefix(3).map(\.id)) }
+        else { ids = Array(items.prefix(5).map(\.id)) }
         return (ids, recommendUsage)
     }
 

@@ -72,13 +72,9 @@ final class RefreshServiceUsageTests: XCTestCase {
         ai.recommendUsage = UsageInfo(inputTokens: 200, outputTokens: 5)
         ai.digestUsage = UsageInfo(inputTokens: 300, outputTokens: 100)
 
+        // 推荐候选阈值升 5：种 ≥ 5 篇文章确保推荐 + 日报都被触发
         let feed = seedFeed("https://f/feed")
-        rss.setSuccess(feed.url, [
-            makeRaw("https://a/1"),
-            makeRaw("https://a/2"),
-            makeRaw("https://a/3"),
-            makeRaw("https://a/4")
-        ])
+        rss.setSuccess(feed.url, (1...5).map { makeRaw("https://a/\($0)") })
 
         await service.refresh()
 
@@ -133,12 +129,9 @@ final class RefreshServiceUsageTests: XCTestCase {
     func testRefreshRecordsRecommendFailure() async {
         struct StubErr: Error {}
         ai.recommendError = StubErr()
+        // 推荐候选阈值升 5：种 ≥ 5 篇才会真正进入 AI 调用并报错
         let feed = seedFeed("https://f/feed")
-        rss.setSuccess(feed.url, [
-            makeRaw("https://a/1"),
-            makeRaw("https://a/2"),
-            makeRaw("https://a/3")
-        ])
+        rss.setSuccess(feed.url, (1...5).map { makeRaw("https://a/\($0)") })
 
         await service.refresh()
 

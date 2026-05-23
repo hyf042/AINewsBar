@@ -14,12 +14,6 @@ struct MenuBarView: View {
 
     private var totalCount: Int { unreadArticles.count + readArticles.count }
 
-    private var listHeight: CGFloat {
-        let rowHeight: CGFloat = 52
-        let separatorHeight: CGFloat = readArticles.isEmpty ? 0 : 28
-        return min(max(CGFloat(totalCount) * rowHeight + separatorHeight, 120), 460)
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             HeaderView(unreadCount: unreadArticles.count, totalCount: totalCount)
@@ -28,105 +22,21 @@ struct MenuBarView: View {
                 aiUnavailableBanner(reason: reason)
                 Divider()
             }
-            articleList
-            if !unreadArticles.isEmpty || refreshService.dailyDigest != nil {
-                Divider()
-                RecommendSectionView(articles: unreadArticles + readArticles,
-                                     onOpen: openArticle)
-                Divider()
-                DigestSectionView()
-            }
+            // 新布局：摘要+推荐变常态显示（骨架屏兜底），文章列表沉到底部折叠
+            // 删除了原有 `if !unreadArticles.isEmpty || refreshService.dailyDigest != nil` guard
+            DigestSectionView()
+            Divider()
+            RecommendSectionView(articles: unreadArticles + readArticles,
+                                 onOpen: openArticle)
+            Divider()
+            ArticleListSection(unreadArticles: unreadArticles,
+                               readArticles: readArticles,
+                               onOpen: openArticle)
             Divider()
             FooterView()
         }
         .frame(width: 380)
         // startup 已在 AppDelegate.applicationDidFinishLaunching；view 出现时不再重复初始化
-    }
-
-    private var articleList: some View {
-        Group {
-            if refreshService.isRefreshing && totalCount == 0 {
-                loadingState
-            } else if let error = refreshService.lastError, totalCount == 0 {
-                errorState(error)
-            } else if totalCount == 0 {
-                emptyState
-            } else {
-                List {
-                    ForEach(unreadArticles) { article in
-                        ArticleRowView(article: article) {
-                            openArticle(article)
-                        }
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.visible)
-                    }
-                    if !readArticles.isEmpty {
-                        HStack {
-                            Text("已读 (\(readArticles.count))")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color(nsColor: .separatorColor).opacity(0.12))
-
-                        ForEach(readArticles) { article in
-                            ArticleRowView(article: article) {
-                                openArticle(article)
-                            }
-                            .listRowInsets(EdgeInsets())
-                            .listRowSeparator(.visible)
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .frame(height: listHeight)
-            }
-        }
-    }
-
-    private var loadingState: some View {
-        VStack(spacing: 8) {
-            ProgressView()
-            Text("正在获取资讯…")
-                .foregroundStyle(.secondary)
-                .font(.caption)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(40)
-    }
-
-    private func errorState(_ message: String) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: "wifi.exclamationmark")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("获取失败")
-                .foregroundStyle(.secondary)
-            Text(message)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 16)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(40)
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "newspaper")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("暂无文章，点击刷新获取")
-                .foregroundStyle(.secondary)
-                .font(.caption)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(40)
     }
 
     private func aiUnavailableBanner(reason: String) -> some View {
@@ -161,4 +71,3 @@ struct MenuBarView: View {
         refreshService.postUnreadCount(context: modelContext)
     }
 }
-

@@ -22,12 +22,12 @@ struct CheckStatusIcon: View {
         case .success(let count):
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(.green)
-                .font(.system(size: 13))
+                .font(Typography.caption)
                 .help("可用，共 \(count) 篇文章")
         case .failure(let msg):
             Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(.red)
-                .font(.system(size: 13))
+                .font(Typography.caption)
                 .help(msg)
         }
     }

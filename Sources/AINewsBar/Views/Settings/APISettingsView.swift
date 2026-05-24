@@ -36,10 +36,10 @@ struct APISettingsView: View {
                     }
                     Button(isRevealed ? "隐藏" : "显示") { isRevealed.toggle() }
                         .buttonStyle(.plain)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(BrandColor.accent)
                 }
                 Text("前往 bailian.console.aliyun.com 获取")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Typography.caption).foregroundStyle(TextColor.secondary)
             }
 
             Section("模型") {
@@ -85,17 +85,17 @@ struct APISettingsView: View {
         case .checking:
             HStack(spacing: 6) {
                 ProgressView().scaleEffect(0.7).frame(width: 14, height: 14)
-                Text("检测中…").font(.caption).foregroundStyle(.secondary)
+                Text("检测中…").font(Typography.caption).foregroundStyle(TextColor.secondary)
             }
         case .success:
             HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
-                Text("API Key 和模型均可用").font(.caption).foregroundStyle(.secondary)
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(Typography.caption)
+                Text("API Key 和模型均可用").font(Typography.caption).foregroundStyle(TextColor.secondary)
             }
         case .failure(let msg):
             HStack(spacing: 6) {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.red).font(.caption)
-                Text(msg).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.red).font(Typography.caption)
+                Text(msg).font(Typography.caption).foregroundStyle(TextColor.secondary).lineLimit(2)
             }
         }
     }

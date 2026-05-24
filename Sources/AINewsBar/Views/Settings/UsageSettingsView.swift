@@ -32,13 +32,14 @@ struct UsageSettingsView: View {
         let stats = UsageAggregator.todayStats(records, now: now)
         return VStack(alignment: .leading, spacing: 8) {
             Text("今日用量")
-                .font(.headline)
+                .font(Typography.titleEmphasized)
+                .foregroundStyle(TextColor.secondary)
             HStack(spacing: 10) {
                 statCard(label: "Tokens", value: UsageFormatter.formatTokens(stats.totalTokens))
                 statCard(label: "调用次数", value: "\(stats.calls)")
                 statCard(label: "失败",
                          value: "\(stats.failures)",
-                         tint: stats.failures > 0 ? .orange : .secondary)
+                         tint: stats.failures > 0 ? BrandColor.accent : TextColor.secondary)
             }
         }
     }
@@ -47,7 +48,8 @@ struct UsageSettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("趋势")
-                    .font(.headline)
+                    .font(Typography.titleEmphasized)
+                    .foregroundStyle(TextColor.secondary)
                 Spacer()
                 Picker("周期", selection: $rangeDays) {
                     Text("7 天").tag(7)
@@ -66,8 +68,8 @@ struct UsageSettingsView: View {
         if points.isEmpty {
             VStack {
                 Text("暂无用量数据")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(Typography.body)
+                    .foregroundStyle(TextColor.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 200)
         } else {
@@ -106,10 +108,10 @@ struct UsageSettingsView: View {
     private func statCard(label: String, value: String, tint: Color = .primary) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Typography.caption)
+                .foregroundStyle(TextColor.secondary)
             Text(value)
-                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .font(Typography.stat)
                 .foregroundStyle(tint)
         }
         .padding(12)

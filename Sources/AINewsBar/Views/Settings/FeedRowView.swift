@@ -9,10 +9,12 @@ struct FeedRowView: View {
     var body: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(feed.title).font(.system(size: 13))
+                Text(feed.title)
+                    .font(Typography.body)
+                    .foregroundStyle(TextColor.primary)
                 Text(feed.url)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Typography.caption)
+                    .foregroundStyle(TextColor.secondary)
                     .lineLimit(1)
             }
             Spacer()
@@ -25,8 +27,8 @@ struct FeedRowView: View {
     private var checkButton: some View {
         Button("检测") { Task { await onCheck() } }
             .buttonStyle(.plain)
-            .font(.caption)
-            .foregroundStyle(Color.accentColor)
+            .font(Typography.caption)
+            .foregroundStyle(BrandColor.accent)
             .disabled({ if case .checking = checkStatus { return true }; return false }())
     }
 }
@@ -42,11 +44,11 @@ struct BuiltInFeedRowView: View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(feed.title)
-                    .font(.system(size: 13))
-                    .foregroundStyle(feed.isEnabled ? .primary : .secondary)
+                    .font(Typography.body)
+                    .foregroundStyle(feed.isEnabled ? TextColor.primary : TextColor.secondary)
                 Text(feed.url)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Typography.caption)
+                    .foregroundStyle(TextColor.secondary)
                     .lineLimit(1)
             }
             Spacer()
@@ -64,8 +66,8 @@ struct BuiltInFeedRowView: View {
     private var checkButton: some View {
         Button("检测") { Task { await onCheck() } }
             .buttonStyle(.plain)
-            .font(.caption)
-            .foregroundStyle(Color.accentColor)
+            .font(Typography.caption)
+            .foregroundStyle(BrandColor.accent)
             .disabled({ if case .checking = checkStatus { return true }; return false }())
     }
 

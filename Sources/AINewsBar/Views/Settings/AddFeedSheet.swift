@@ -11,7 +11,9 @@ struct AddFeedSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("添加 RSS 订阅源").font(.headline)
+            Text("添加 RSS 订阅源")
+                .font(Typography.titleEmphasized)
+                .foregroundStyle(TextColor.primary)
 
             LabeledContent("标题") {
                 TextField("例：My AI Blog", text: $title)
@@ -51,17 +53,17 @@ struct AddFeedSheet: View {
         case .checking:
             HStack(spacing: 6) {
                 ProgressView().scaleEffect(0.7).frame(width: 14, height: 14)
-                Text("正在检测…").font(.caption).foregroundStyle(.secondary)
+                Text("正在检测…").font(Typography.caption).foregroundStyle(TextColor.secondary)
             }
         case .success(let count):
             HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
-                Text("检测通过，共 \(count) 篇文章").font(.caption).foregroundStyle(.secondary)
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(Typography.caption)
+                Text("检测通过，共 \(count) 篇文章").font(Typography.caption).foregroundStyle(TextColor.secondary)
             }
         case .failure(let msg):
             HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.caption)
-                Text(msg).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(BrandColor.accent).font(Typography.caption)
+                Text(msg).font(Typography.caption).foregroundStyle(TextColor.secondary).lineLimit(2)
             }
         }
     }

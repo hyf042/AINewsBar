@@ -55,8 +55,8 @@ struct FeedsSettingsView: View {
             HStack {
                 if let summary = summaryText {
                     Text(summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Typography.caption)
+                        .foregroundStyle(TextColor.secondary)
                 }
                 Spacer()
                 Button("检测全部") {

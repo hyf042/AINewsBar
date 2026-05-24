@@ -25,11 +25,13 @@ struct FeedRowView: View {
     }
 
     private var checkButton: some View {
-        Button("检测") { Task { await onCheck() } }
-            .buttonStyle(.plain)
-            .font(Typography.caption)
-            .foregroundStyle(BrandColor.accent)
-            .disabled({ if case .checking = checkStatus { return true }; return false }())
+        Button { Task { await onCheck() } } label: {
+            Text("检测")
+                .font(Typography.caption)
+                .foregroundStyle(BrandColor.accent)
+        }
+        .buttonStyle(.plain)
+        .disabled({ if case .checking = checkStatus { return true }; return false }())
     }
 }
 
@@ -64,11 +66,13 @@ struct BuiltInFeedRowView: View {
     }
 
     private var checkButton: some View {
-        Button("检测") { Task { await onCheck() } }
-            .buttonStyle(.plain)
-            .font(Typography.caption)
-            .foregroundStyle(BrandColor.accent)
-            .disabled({ if case .checking = checkStatus { return true }; return false }())
+        Button { Task { await onCheck() } } label: {
+            Text("检测")
+                .font(Typography.caption)
+                .foregroundStyle(BrandColor.accent)
+        }
+        .buttonStyle(.plain)
+        .disabled({ if case .checking = checkStatus { return true }; return false }())
     }
 
     private func handleToggle(enabled: Bool) {

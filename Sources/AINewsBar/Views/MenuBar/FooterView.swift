@@ -40,13 +40,15 @@ struct FooterView: View {
             }
             Spacer()
             if refreshService.lastFetchErrorCount > 0 {
-                Button("⚠ \(refreshService.lastFetchErrorCount) 个源失败") {
+                Button {
                     NSApp.activate(ignoringOtherApps: true)
                     openSettings()
+                } label: {
+                    Text("⚠ \(refreshService.lastFetchErrorCount) 个源失败")
+                        .font(Typography.caption)
+                        .foregroundStyle(BrandColor.accent)
                 }
                 .buttonStyle(.plain)
-                .font(Typography.caption)
-                .foregroundStyle(BrandColor.accent)
             }
             Button {
                 NSApp.activate(ignoringOtherApps: true)

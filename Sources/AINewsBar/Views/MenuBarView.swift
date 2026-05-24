@@ -49,13 +49,15 @@ struct MenuBarView: View {
                 .foregroundStyle(TextColor.tertiary)
                 .lineLimit(1)
             Spacer()
-            Button("去设置") {
+            Button {
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
+            } label: {
+                Text("去设置")
+                    .font(Typography.caption)
+                    .foregroundStyle(BrandColor.accent)
             }
             .buttonStyle(.plain)
-            .font(Typography.caption)
-            .foregroundStyle(BrandColor.accent)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)

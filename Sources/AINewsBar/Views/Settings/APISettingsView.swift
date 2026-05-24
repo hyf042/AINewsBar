@@ -34,9 +34,11 @@ struct APISettingsView: View {
                     } else {
                         SecureField("sk-...", text: $apiKey)
                     }
-                    Button(isRevealed ? "隐藏" : "显示") { isRevealed.toggle() }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(BrandColor.accent)
+                    Button { isRevealed.toggle() } label: {
+                        Text(isRevealed ? "隐藏" : "显示")
+                            .foregroundStyle(BrandColor.accent)
+                    }
+                    .buttonStyle(.plain)
                 }
                 Text("前往 bailian.console.aliyun.com 获取")
                     .font(Typography.caption).foregroundStyle(TextColor.secondary)
@@ -65,6 +67,7 @@ struct APISettingsView: View {
                 checkStatusRow
                 HStack {
                     Button("检测可用性") { Task { await checkConnection() } }
+                        .tint(BrandColor.accent)
                         .disabled(apiKey.isEmpty || effectiveModel.isEmpty || isChecking)
                     Spacer()
                     Button("保存") { Task { await saveAndCheck() } }

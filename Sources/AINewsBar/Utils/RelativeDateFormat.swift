@@ -25,16 +25,20 @@ func formatArticleRelative(
         return "\(Int(delta / 60)) 分钟前"
     }
 
-    if calendar.isDateInToday(date) {
+    // 注意：不能用 `calendar.isDateInToday(date)` / `isDateInYesterday(date)` ——
+    // 这两个 API 内部以系统 `Date()` 锚定，会忽略传入的 `now` 参数，
+    // 导致跨日 fixture 测试在 fixture-day ≠ real-today 时全线失败。
+    // 改用 startOfDay(for: now) 手算 days，让时钟注入语义闭环。
+    let startOfNow = calendar.startOfDay(for: now)
+    let startOfDate = calendar.startOfDay(for: date)
+    let days = calendar.dateComponents([.day], from: startOfDate, to: startOfNow).day ?? 0
+
+    if days == 0 {
         return "\(Int(delta / 3600)) 小时前"
     }
-    if calendar.isDateInYesterday(date) {
+    if days == 1 {
         return "昨天"
     }
-
-    let startOfToday = calendar.startOfDay(for: now)
-    let startOfDate = calendar.startOfDay(for: date)
-    let days = calendar.dateComponents([.day], from: startOfDate, to: startOfToday).day ?? 0
     if days <= 6 {
         return "\(days) 天前"
     }

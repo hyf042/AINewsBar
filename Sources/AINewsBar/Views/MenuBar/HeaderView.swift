@@ -8,16 +8,17 @@ struct HeaderView: View {
     var body: some View {
         HStack {
             Text("AI 资讯 [\(unreadCount)/\(totalCount)]")
-                .font(.headline)
+                .font(Typography.headline)
+                .foregroundStyle(TextColor.primary)
             Spacer()
             if refreshService.isSummarizing {
                 HStack(spacing: 4) {
                     ProgressView()
-                        .scaleEffect(0.6)
+                        .scaleEffect(0.55)
                         .frame(width: 14, height: 14)
                     Text("AI 摘要中")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(Typography.caption)
+                        .foregroundStyle(TextColor.tertiary)
                 }
             } else if refreshService.isRefreshing {
                 ProgressView()
@@ -28,7 +29,7 @@ struct HeaderView: View {
                 Task { await refreshService.refresh() }
             } label: {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12))
+                    .font(Typography.body)
             }
             .buttonStyle(.plain)
             .disabled(refreshService.isRefreshing || refreshService.isSummarizing)

@@ -51,23 +51,23 @@ struct ArticleListSection: View {
     private var foldedHeader: some View {
         HStack(spacing: 6) {
             Image(systemName: "list.bullet")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(Typography.titleEmphasized)
+                .foregroundStyle(TextColor.secondary)
             Text("今日文章")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
+                .font(Typography.titleEmphasized)
+                .foregroundStyle(TextColor.secondary)
             Text("· \(subtitle)")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+                .font(Typography.caption)
+                .foregroundStyle(TextColor.tertiary)
             Spacer()
             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                .font(.system(size: 9))
-                .foregroundStyle(.tertiary)
+                .font(Typography.caption)
+                .foregroundStyle(TextColor.tertiary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary)
+        .background(BrandColor.surfaceMuted)
         .contentShape(Rectangle())
         .onTapGesture {
             withAnimation(.easeInOut(duration: 0.25)) {
@@ -101,8 +101,8 @@ struct ArticleListSection: View {
             if !readArticles.isEmpty {
                 HStack {
                     Text("已读 (\(readArticles.count))")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .font(Typography.caption)
+                        .foregroundStyle(TextColor.tertiary)
                     Spacer()
                 }
                 .padding(.horizontal, 12)
@@ -128,8 +128,8 @@ struct ArticleListSection: View {
         VStack(spacing: 8) {
             ProgressView()
             Text("正在获取资讯…")
-                .foregroundStyle(.secondary)
-                .font(.caption)
+                .foregroundStyle(TextColor.secondary)
+                .font(Typography.caption)
         }
         .frame(maxWidth: .infinity)
         .padding(40)
@@ -139,12 +139,13 @@ struct ArticleListSection: View {
         VStack(spacing: 8) {
             Image(systemName: "wifi.exclamationmark")
                 .font(.largeTitle)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(TextColor.secondary)
             Text("获取失败")
-                .foregroundStyle(.secondary)
+                .font(Typography.body)
+                .foregroundStyle(TextColor.secondary)
             Text(message)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(Typography.caption)
+                .foregroundStyle(TextColor.tertiary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
         }
@@ -156,10 +157,10 @@ struct ArticleListSection: View {
         VStack(spacing: 8) {
             Image(systemName: "newspaper")
                 .font(.largeTitle)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(TextColor.secondary)
             Text("暂无文章，点击刷新获取")
-                .foregroundStyle(.secondary)
-                .font(.caption)
+                .foregroundStyle(TextColor.secondary)
+                .font(Typography.caption)
         }
         .frame(maxWidth: .infinity)
         .padding(40)

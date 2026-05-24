@@ -20,23 +20,23 @@ struct FooterView: View {
             if let date = refreshService.lastRefreshDate {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("最后更新")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
+                        .font(Typography.caption)
+                        .foregroundStyle(TextColor.tertiary)
                     HStack(spacing: 6) {
                         Text(date, format: .dateTime.hour().minute().second())
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .font(Typography.caption)
+                            .foregroundStyle(TextColor.secondary)
                         if todayTokenTotal > 0 {
                             Text("· 今日 \(UsageFormatter.formatTokens(todayTokenTotal)) tokens")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
+                                .font(Typography.caption)
+                                .foregroundStyle(TextColor.tertiary)
                         }
                     }
                 }
             } else {
                 Text("未刷新")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(Typography.caption)
+                    .foregroundStyle(TextColor.tertiary)
             }
             Spacer()
             if refreshService.lastFetchErrorCount > 0 {
@@ -45,27 +45,27 @@ struct FooterView: View {
                     openSettings()
                 }
                 .buttonStyle(.plain)
-                .font(.caption2)
-                .foregroundStyle(.orange)
+                .font(Typography.caption)
+                .foregroundStyle(BrandColor.accent)
             }
             Button {
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
             } label: {
                 Text("设置")
-                    .font(.caption)
+                    .font(Typography.caption)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(TextColor.secondary)
 
             Button {
                 NSApp.terminate(nil)
             } label: {
                 Text("退出")
-                    .font(.caption)
+                    .font(Typography.caption)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(TextColor.secondary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)

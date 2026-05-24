@@ -28,38 +28,38 @@ struct RecommendSectionView: View {
             }
         }
         .padding(.bottom, 4)
-        .background(.quaternary)
+        .background(BrandColor.surfaceMuted)
     }
 
     private func header(loading: Bool) -> some View {
         HStack(spacing: 4) {
             Image(systemName: "star.fill")
-                .font(.footnote)
-                .foregroundStyle(loading ? Color.secondary : Color.orange)
+                .font(Typography.titleEmphasized)
+                .foregroundStyle(loading ? AnyShapeStyle(TextColor.secondary) : AnyShapeStyle(BrandColor.accent))
             Text("AI 今日推荐")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
+                .font(Typography.titleEmphasized)
+                .foregroundStyle(TextColor.secondary)
             if let date = refreshService.lastRecommendDate {
                 Text(date, style: .time)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                    .font(Typography.caption)
+                    .foregroundStyle(TextColor.tertiary)
             }
             Spacer()
             if refreshService.isRegeneratingRecommend {
                 ProgressView().scaleEffect(0.55).frame(width: 12, height: 12)
-                Text("生成中…").font(.caption2).foregroundStyle(.tertiary)
+                Text("生成中…").font(Typography.caption).foregroundStyle(TextColor.tertiary)
             } else if loading && refreshService.isSummarizing {
                 ProgressView().scaleEffect(0.55).frame(width: 12, height: 12)
-                Text("生成中…").font(.caption2).foregroundStyle(.tertiary)
+                Text("生成中…").font(Typography.caption).foregroundStyle(TextColor.tertiary)
             } else {
                 Button {
                     Task { await refreshService.forceRegenerateRecommend() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10))
+                        .font(Typography.caption)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(TextColor.tertiary)
                 .disabled(refreshService.isRegeneratingRecommend || refreshService.isSummarizing)
                 .help("重新生成推荐")
             }
@@ -74,8 +74,8 @@ struct RecommendSectionView: View {
             VStack(spacing: 0) {
                 HStack(alignment: .top, spacing: 8) {
                     Text("\(i)")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.tertiary)
+                        .font(Typography.captionEmphasized)
+                        .foregroundStyle(TextColor.tertiary)
                         .frame(width: 14)
                     RoundedRectangle(cornerRadius: 3)
                         .fill(Color.secondary.opacity(0.12))

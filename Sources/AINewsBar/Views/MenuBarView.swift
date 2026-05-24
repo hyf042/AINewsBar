@@ -42,11 +42,11 @@ struct MenuBarView: View {
     private func aiUnavailableBanner(reason: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .font(.system(size: 11))
+                .foregroundStyle(BrandColor.accent)
+                .font(Typography.caption)
             Text("AI 不可用：\(reason)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Typography.caption)
+                .foregroundStyle(TextColor.tertiary)
                 .lineLimit(1)
             Spacer()
             Button("去设置") {
@@ -54,13 +54,13 @@ struct MenuBarView: View {
                 openSettings()
             }
             .buttonStyle(.plain)
-            .font(.caption)
-            .foregroundStyle(Color.accentColor)
+            .font(Typography.caption)
+            .foregroundStyle(BrandColor.accent)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity)
-        .background(Color.orange.opacity(0.08))
+        .background(BrandColor.accentSoft)
     }
 
     private func openArticle(_ article: Article) {

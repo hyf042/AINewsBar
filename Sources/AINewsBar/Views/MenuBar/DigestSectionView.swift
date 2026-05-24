@@ -19,15 +19,15 @@ struct DigestSectionView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
                 Image(systemName: "brain")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(Typography.titleEmphasized)
+                    .foregroundStyle(TextColor.secondary)
                 Text("今日 AI 资讯摘要")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .font(Typography.titleEmphasized)
+                    .foregroundStyle(TextColor.secondary)
                 if let date = refreshService.lastDigestDate {
                     Text(date, style: .time)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+                        .font(Typography.caption)
+                        .foregroundStyle(TextColor.tertiary)
                 }
                 Spacer()
                 if refreshService.isRegeneratingDigest {
@@ -37,20 +37,20 @@ struct DigestSectionView: View {
                         Task { await refreshService.forceRegenerateDigest() }
                     } label: {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 10))
+                            .font(Typography.caption)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(TextColor.tertiary)
                     .disabled(refreshService.isRegeneratingDigest || refreshService.isSummarizing)
                     .help("重新生成摘要")
                 }
                 Image(systemName: (isExpanded || isHovered) ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
+                    .font(Typography.caption)
+                    .foregroundStyle(TextColor.tertiary)
             }
             Text(digest)
-                .font(.system(size: 12))
-                .foregroundStyle(.primary)
+                .font(Typography.callout)
+                .foregroundStyle(TextColor.primary)
                 .lineLimit((isExpanded || isHovered) ? nil : 5)
                 .fixedSize(horizontal: false, vertical: true)
                 .animation(.easeInOut(duration: 0.2), value: isExpanded || isHovered)
@@ -58,7 +58,7 @@ struct DigestSectionView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary)
+        .background(BrandColor.surfaceMuted)
         .contentShape(Rectangle())
         .onTapGesture { isExpanded.toggle() }
         .onHover { hovering in
@@ -71,26 +71,26 @@ struct DigestSectionView: View {
     private var placeholderBody: some View {
         HStack(spacing: 8) {
             Image(systemName: "brain")
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
+                .font(Typography.titleEmphasized)
+                .foregroundStyle(TextColor.tertiary)
             Text("今日 AI 资讯摘要")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.tertiary)
+                .font(Typography.titleEmphasized)
+                .foregroundStyle(TextColor.tertiary)
             Spacer()
             if refreshService.isRegeneratingDigest || refreshService.isSummarizing {
                 ProgressView().scaleEffect(0.55).frame(width: 12, height: 12)
                 Text("生成中…")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(Typography.caption)
+                    .foregroundStyle(TextColor.tertiary)
             } else {
                 Button {
                     Task { await refreshService.forceRegenerateDigest() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10))
+                        .font(Typography.caption)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(TextColor.tertiary)
                 .disabled(refreshService.isRegeneratingDigest || refreshService.isSummarizing)
                 .help("重新生成摘要")
             }
@@ -98,6 +98,6 @@ struct DigestSectionView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
-        .background(.quaternary)
+        .background(BrandColor.surfaceMuted)
     }
 }

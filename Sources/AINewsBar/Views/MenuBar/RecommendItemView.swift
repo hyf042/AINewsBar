@@ -9,15 +9,14 @@ struct RecommendItemView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // 未读色条：贴左缘 3pt，与 index 色调统一；已读透明保留宽度避免抖动
             Rectangle()
-                .fill(article.isRead ? Color.clear : Color.orange)
+                .fill(article.isRead ? Color.clear : BrandColor.accent)
                 .frame(width: 3)
 
             HStack(alignment: .top, spacing: 8) {
                 Text("\(index)")
-                    .font(.system(size: 11, weight: article.isRead ? .regular : .bold))
-                    .foregroundStyle(article.isRead ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.orange))
+                    .font(article.isRead ? Typography.caption : Typography.captionEmphasized)
+                    .foregroundStyle(article.isRead ? AnyShapeStyle(TextColor.tertiary) : AnyShapeStyle(BrandColor.accent))
                     .frame(width: 14)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
@@ -25,18 +24,18 @@ struct RecommendItemView: View {
                         Spacer()
                         Text(formatArticleRelative(article.publishedAt))
                     }
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(Typography.caption)
+                    .foregroundStyle(TextColor.tertiary)
 
                     Text(article.title)
-                        .font(.system(size: 12, weight: article.isRead ? .regular : .semibold))
-                        .foregroundStyle(article.isRead ? .secondary : .primary)
+                        .font(article.isRead ? Typography.callout : Typography.calloutEmphasized)
+                        .foregroundStyle(article.isRead ? TextColor.secondary : TextColor.primary)
                         .lineLimit(2)
 
                     if let summary = article.aiSummary {
                         Text(summary)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .font(Typography.caption)
+                            .foregroundStyle(TextColor.secondary)
                             .lineLimit(isHovered ? nil : 1)
                             .fixedSize(horizontal: false, vertical: true)
                             .animation(.easeInOut(duration: 0.15), value: isHovered)

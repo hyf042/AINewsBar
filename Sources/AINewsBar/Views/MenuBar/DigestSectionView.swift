@@ -2,8 +2,8 @@ import SwiftUI
 
 struct DigestSectionView: View {
     @EnvironmentObject private var refreshService: RefreshService
-    @State private var isExpanded = false
-    @State private var isHovered = false
+    // 默认展开（摘要本就是为了"一眼看完"）；保留点击折叠让用户嫌长时可手动收
+    @State private var isExpanded = true
 
     var body: some View {
         Group {
@@ -44,26 +44,25 @@ struct DigestSectionView: View {
                     .disabled(refreshService.isRegeneratingDigest || refreshService.isSummarizing)
                     .help("重新生成摘要")
                 }
-                Image(systemName: (isExpanded || isHovered) ? "chevron.up" : "chevron.down")
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                     .font(Typography.caption)
                     .foregroundStyle(TextColor.tertiary)
             }
-            Text(digest)
-                .font(Typography.callout)
-                .foregroundStyle(TextColor.primary)
-                .lineLimit((isExpanded || isHovered) ? nil : 5)
-                .fixedSize(horizontal: false, vertical: true)
-                .animation(.easeInOut(duration: 0.2), value: isExpanded || isHovered)
+            if isExpanded {
+                Text(digest)
+                    .font(Typography.callout)
+                    .foregroundStyle(TextColor.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(BrandColor.surfaceMuted)
         .contentShape(Rectangle())
-        .onTapGesture { isExpanded.toggle() }
-        .onHover { hovering in
+        .onTapGesture {
             withAnimation(.easeInOut(duration: 0.2)) {
-                isHovered = hovering
+                isExpanded.toggle()
             }
         }
     }

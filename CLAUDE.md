@@ -66,6 +66,17 @@ macOS 菜单栏 AI 资讯阅读器。通过 `/grill-me` 技术访谈定义设计
 14. **新增 DesignTokensTests** 3 个 Swift Testing 单测（token 实例化 + dynamic provider 双 appearance 验证用 `NSAppearance.performAsCurrentDrawingAppearance`）；全套 143/143 通过
 15. **TextColor 加中间档 `secondaryWeak = Color.primary.opacity(0.40)`**：浅色模式下 feed 来源名（"量子位"等）用 tertiary 26% 太淡看不清，但跳到 secondary 50% 又喧宾夺主。新增 40% 中间档，仅 `ArticleRowView` + `RecommendItemView` 的 `feedTitle` 使用；时间继续 tertiary 形成行内层级（先看来源后看时间）
 
+**2026-05-24 增量**：摘要 markdown 噪声治理 + DigestSection 默认展开（grill 7 轮 → 单 commit 6 step / 149 测试覆盖）。
+1. **新建 `Utils/MarkdownStripper.swift`** 纯函数 + 6 个 Swift Testing 单测：strip `**bold**` / `__bold__` / 行首 `# ## ###` 标题前缀；保留行首 `- * +` 列表符号（中文摘要合理层次表达）；单星不动避免误伤
+2. **`DigestEngine.run` + `SummaryPipeline.runOne` 接入 stripper**：在 "AI 返回 → outcome / trim 判空" 边界各 strip 一次，prefs/SwiftData 存的都是 clean 版（持久化一致性 + 未来其他出口统一）
+3. **Prompt 双约束**（`makeDigestPrompt` + `makeSummaryPrompt`）：在"必须用中文回复"后追加 "请用纯文本回复，不要使用 markdown 语法（不要使用 \*\*、##、- 等符号）"——列举具体符号比泛说 markdown 更可执行
+4. **`DigestSectionView` 改默认展开 + 可点击折叠**（踩坑 #26）：
+   - 删除 `isHovered` + `onHover` + lineLimit 三元判断（hover 自动展开 + 收起态裁 5 行的复杂状态机）
+   - `isExpanded` 默认 `true` 保留点击折叠（嫌长可手动收）；chevron 跟 isExpanded 走（up/down）
+   - 折叠态仅显示 header（不再裁 body 显示前 5 行）
+5. **设计决策记录新增**：见末尾 "AI 输出净化" / "DigestSection 折叠策略" 行
+6. **`feedback_ainewsbar_pitfalls.md` 新增 #26**：AI prompt 未约束格式→markdown 噪声，需 prompt + UI strip 双手硬
+
 **位置：** `/Users/hyf042/Projects/AINewsBar`  
 **性质：** 个人工具，Swift Package Manager，macOS 14+，无 Xcode project 文件
 
@@ -115,6 +126,8 @@ macOS 菜单栏 AI 资讯阅读器。通过 `/grill-me` 技术访谈定义设计
 | 区域背景 | `BrandColor.surfaceMuted` (6% Color.primary) 替换 `.quaternary` | 浅色模式三块灰背景叠加观感过重；6% 是肉眼可辨 + 不压迫的平衡点 |
 | 文章行未读指示 | 4pt orange leading dot（HStack 顶部对齐 padding 5pt），不加行底色 | 推荐区色条 + 文章行 dot 两套差异化方案：推荐有 index 数字占位，文章行结构更紧凑；dot 与色条同用 BrandColor.accent 视觉协调 |
 | AI banner 双值 opacity | accentSoft 浅色 0.08 / 深色 0.20 | 深色下 8% 几乎不可见，必须双值；浅色 8% 已足够 |
+| AI 输出净化 | `MarkdownStripper.strip` 纯函数在 `DigestEngine.run` 与 `SummaryPipeline.runOne` 双点接入；prompt 端同步追加"不要使用 markdown 语法"约束 | 单靠 prompt 不可靠（temperature > 0 + 模型自由度）；单靠 strip 易出"strip 后纯文本结构错乱"。两手都要硬，prompt 主防 + UI strip 兜底；处理范围保守（`**` / `__` / 行首 `# ## ###`），保留 `- * +` 中文列表层次 |
+| DigestSection 折叠策略 | 默认 `isExpanded=true` 全展开 + 点击可折叠；去掉 hover 自动展开与 lineLimit(5) 收起态裁切 | 摘要本就是"一眼看完"，折叠违背设计意图；用户痛点是"差 1-2 行"——根因是 lineLimit(5) + AI 偶发输出 6-7 行（含 markdown 噪声更糟），双 bug 互相强化；保留点击折叠让"嫌长可手动收"的少数派可用 |
 
 ```bash
 cd /Users/hyf042/Projects/AINewsBar
@@ -225,6 +238,7 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 | `Utils/ModelContext+Safe.swift` | 双轨 API：`safeFetch / safeSave / safeFetchCount`（失败容忍版，返回空集合 / false / 0）+ `safeFetchOrThrow / safeSaveOrThrow`（严格抛出版）；均含调用位置日志 `[DB] file:line — error` |
 | `Utils/Log.swift` | 包装 `os.Logger`，subsystem=`com.ainewsbar`；Console.app 可见 |
 | `Utils/RelativeDateFormat.swift` | 纯函数 `formatArticleRelative(_:now:calendar:)`：刚刚 / X 分钟前 / X 小时前 / 昨天 / N 天前 / M-d；时钟可注入；ArticleRowView + RecommendItemView 共用 |
+| `Utils/MarkdownStripper.swift` | 纯函数 `strip(_:)`：去 `**` / `__` 粗体标记 + 行首 `# ## ###` 标题前缀；保留行首 `- * +` 列表符号与单星强调；DigestEngine.run / SummaryPipeline.runOne 双点接入 |
 
 ### 其他
 | 路径 | 说明 |

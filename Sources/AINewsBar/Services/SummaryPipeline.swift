@@ -90,7 +90,9 @@ struct SummaryPipeline {
             if _Concurrency.Task.isCancelled { return .cancelled }
             // 空内容降级为 failure —— AI HTTP 200 但返回空串时，旧逻辑会写入 aiSummary=""
             // 导致 ArticleSnapshot.summarized 判定通过，digest prompt 退化为纯标题列表
-            let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            // 先 strip markdown 噪声再 trim，避免 stripper 后只剩空白通过判空
+            let stripped = MarkdownStripper.strip(summary)
+            let trimmed = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
                 Log.write("[Summary] empty content for: \(t.title.prefix(30))")
                 return .failure(t.id)

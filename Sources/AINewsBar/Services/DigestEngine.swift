@@ -20,11 +20,13 @@ struct DigestEngine {
     ) async throws -> Outcome? {
         guard snapshot.summarizedCount >= 3 else { return nil }
 
-        let (content, usage) = try await ai.generateDigest(
+        let (rawContent, usage) = try await ai.generateDigest(
             items: snapshot.summarized,
             apiKey: apiKey,
             model: model
         )
+        // AI 偶尔输出 **bold** / # 标题 等 markdown 噪声，UI 不渲染 markdown 会字面显示
+        let content = MarkdownStripper.strip(rawContent)
         Log.write("[Digest] generated from \(snapshot.summarizedCount) summaries")
         return Outcome(
             content: content,

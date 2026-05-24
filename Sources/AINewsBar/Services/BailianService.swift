@@ -66,7 +66,7 @@ actor BailianService: AISummarizing {
 
     static func makeSummaryPrompt(title: String, content: String?) -> String {
         """
-        请用中文一句话（不超过50字）概括以下文章的核心内容，无论原文是何种语言，必须用中文回复：
+        请用中文一句话（不超过50字）概括以下文章的核心内容，无论原文是何种语言，必须用中文回复，请用纯文本回复，不要使用 markdown 语法（不要使用 **、##、- 等符号）：
 
         标题：\(title)
         内容：\(content?.prefix(1500) ?? "无正文")
@@ -100,7 +100,7 @@ actor BailianService: AISummarizing {
         .joined(separator: "\n")
 
         return """
-        以下是今日 AI 资讯（标题｜摘要），请用中文写 2-3 句话概括今日最重要的 AI 进展，必须用中文回复：
+        以下是今日 AI 资讯（标题｜摘要），请用中文写 2-3 句话概括今日最重要的 AI 进展，必须用中文回复，请用纯文本回复，不要使用 markdown 语法（不要使用 **、##、- 等符号）：
 
         \(lines)
         """

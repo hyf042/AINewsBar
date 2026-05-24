@@ -18,27 +18,34 @@ enum UsageAggregator {
     }
 
     /// 今日统计：成功调用的 token 总和、总调用次数（含失败）、失败次数。
+    /// v2 加 category 可选 filter：nil = 全部三 cat 聚合（Footer "今日总和" 用）；
+    /// 传具体 cat = 仅该 cat（Settings 用量 Tab Picker filter 用）。
     static func todayStats(
         _ records: [UsageRecord],
         now: Date = Date(),
-        calendar: Calendar = Calendar.current
+        calendar: Calendar = Calendar.current,
+        category: AINewsBar.Category? = nil
     ) -> TodayStats {
         let start = calendar.startOfDay(for: now)
-        let today = records.filter { $0.timestamp >= start }
-        let totalTokens = today
+        let filtered = category.map { cat in
+            records.filter { $0.timestamp >= start && $0.category == cat.rawValue }
+        } ?? records.filter { $0.timestamp >= start }
+        let totalTokens = filtered
             .filter(\.success)
             .reduce(0) { $0 + $1.totalTokens }
-        let failures = today.filter { !$0.success }.count
-        return TodayStats(totalTokens: totalTokens, calls: today.count, failures: failures)
+        let failures = filtered.filter { !$0.success }.count
+        return TodayStats(totalTokens: totalTokens, calls: filtered.count, failures: failures)
     }
 
     /// 按 (day, scene) 聚合的 token 用量。
     /// 仅含成功调用；day 为当地时区的 startOfDay；含值为 0 的桶被过滤。
+    /// v2 加 category 可选 filter（同 todayStats 语义）。
     static func dailyByScene(
         _ records: [UsageRecord],
         days: Int,
         now: Date = Date(),
-        calendar: Calendar = Calendar.current
+        calendar: Calendar = Calendar.current,
+        category: AINewsBar.Category? = nil
     ) -> [DailyPoint] {
         guard days > 0 else { return [] }
         let endOfToday = calendar.startOfDay(for: now)
@@ -48,6 +55,8 @@ enum UsageAggregator {
 
         var bucket: [Date: [UsageScene: Int]] = [:]
         for r in records where r.success && r.timestamp >= start {
+            // v2 加 cat filter：仅指定 cat 才入桶
+            if let cat = category, r.category != cat.rawValue { continue }
             let day = calendar.startOfDay(for: r.timestamp)
             guard let scene = r.sceneEnum else { continue }
             bucket[day, default: [:]][scene, default: 0] += r.totalTokens

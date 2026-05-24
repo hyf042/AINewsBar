@@ -7,18 +7,61 @@ protocol RSSFetching: Sendable {
     func fetchRawArticles(feedURL: String) async throws -> [RawArticle]
 }
 
+// MARK: - AISummarizing（v2-multi-category 双轨）
+//
+// Phase 3 引入 per-cat 签名 + classifyArticle（Filter Stage）。
+// 旧签名走 protocol extension 自动 delegate 到 .ai；Phase 4 RefreshService 改造后删旧签名。
 protocol AISummarizing: Sendable {
-    /// 返回摘要 + 本次调用的 token 用量。
-    func generateSummary(title: String, content: String?, apiKey: String, model: String)
-        async throws -> (summary: String, usage: UsageInfo)
+    // MARK: per-cat 新签名（Phase 3 引入，Phase 4 后成为正式 API）
+
+    /// 返回摘要 + 本次调用的 token 用量。prompt 文案根据 cat 选择。
+    func generateSummary(
+        title: String, content: String?,
+        category: AINewsBar.Category, apiKey: String, model: String
+    ) async throws -> (summary: String, usage: UsageInfo)
 
     /// 入参 items 应包含全部候选；返回选中的 id 列表（保序）+ token 用量。
-    func recommendArticles(_ items: [ArticleSnapshot.Item], apiKey: String, model: String)
-        async throws -> (ids: [UUID], usage: UsageInfo)
+    func recommendArticles(
+        _ items: [ArticleSnapshot.Item],
+        category: AINewsBar.Category, apiKey: String, model: String
+    ) async throws -> (ids: [UUID], usage: UsageInfo)
 
     /// 入参 items 应仅含已有摘要的条目（caller 负责过滤）；nil-summary 项实现侧防御性跳过。
+    func generateDigest(
+        items: [ArticleSnapshot.Item],
+        category: AINewsBar.Category, apiKey: String, model: String
+    ) async throws -> (content: String, usage: UsageInfo)
+
+    // MARK: 新增 (Filter Stage)
+
+    /// AI Filter：判断文章是否属于指定 cat（如财报）。仅返回 Bool（accepted/rejected）+ token 用量。
+    /// caller (FilterPipeline) 负责解析失败的 retry / filterFailCount++ 逻辑。
+    func classifyArticle(
+        title: String, description: String, prompt: String,
+        apiKey: String, model: String
+    ) async throws -> (accepted: Bool, usage: UsageInfo)
+}
+
+// 旧签名默认实现：转发到新签名 + .ai（Phase 4 RefreshService 改造后可删）
+extension AISummarizing {
+    func generateSummary(title: String, content: String?, apiKey: String, model: String)
+        async throws -> (summary: String, usage: UsageInfo)
+    {
+        try await generateSummary(title: title, content: content,
+                                  category: .ai, apiKey: apiKey, model: model)
+    }
+
+    func recommendArticles(_ items: [ArticleSnapshot.Item], apiKey: String, model: String)
+        async throws -> (ids: [UUID], usage: UsageInfo)
+    {
+        try await recommendArticles(items, category: .ai, apiKey: apiKey, model: model)
+    }
+
     func generateDigest(items: [ArticleSnapshot.Item], apiKey: String, model: String)
         async throws -> (content: String, usage: UsageInfo)
+    {
+        try await generateDigest(items: items, category: .ai, apiKey: apiKey, model: model)
+    }
 }
 
 // MARK: - PreferencesStoring（v2-multi-category 双轨）

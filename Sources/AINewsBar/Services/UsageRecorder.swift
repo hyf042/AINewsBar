@@ -10,9 +10,13 @@ final class UsageRecorder: UsageRecording {
         self.context = context
     }
 
-    func record(scene: UsageScene, model: String, input: Int, output: Int, success: Bool) {
+    func record(
+        scene: UsageScene, category: AINewsBar.Category,
+        model: String, input: Int, output: Int, success: Bool
+    ) {
         let record = UsageRecord(
             scene: scene,
+            category: category,
             model: model,
             inputTokens: max(0, input),
             outputTokens: max(0, output),

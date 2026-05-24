@@ -13,8 +13,10 @@ struct RecommendEngine {
     let ai: any AISummarizing
 
     /// 返回 nil = 候选不足（数据完整性保护）；throws = AI 调用失败
+    /// v2-multi-category: category 参数选 cat-specific prompt（默认 .ai 兼容 Phase 4 前调用方）
     func run(
         snapshot: ArticleSnapshot,
+        category: AINewsBar.Category = .ai,
         apiKey: String,
         model: String
     ) async throws -> Outcome? {
@@ -22,8 +24,10 @@ struct RecommendEngine {
         // 前置 guard 避免无谓 LLM 调用；推荐展示数从 3 升 5 后同步抬升
         guard snapshot.all.count >= 5 else { return nil }
 
-        let (ids, usage) = try await ai.recommendArticles(snapshot.all, apiKey: apiKey, model: model)
-        Log.write("[Recommend] picked \(ids.count) from \(snapshot.all.count) articles")
+        let (ids, usage) = try await ai.recommendArticles(
+            snapshot.all, category: category, apiKey: apiKey, model: model
+        )
+        Log.write("[Recommend][\(category.rawValue)] picked \(ids.count) from \(snapshot.all.count) articles")
         return Outcome(
             ids: ids,
             generatedAt: Date(),

@@ -7,6 +7,15 @@ struct SummaryPipeline {
         let id: UUID
         let title: String
         let content: String?
+        /// v2-multi-category: 每个 task 携带 cat，BailianService 据此选 prompt 文案
+        let category: AINewsBar.Category
+
+        init(id: UUID, title: String, content: String?, category: AINewsBar.Category = .ai) {
+            self.id = id
+            self.title = title
+            self.content = content
+            self.category = category
+        }
     }
 
     struct CompletedItem: Sendable {
@@ -84,7 +93,8 @@ struct SummaryPipeline {
         if _Concurrency.Task.isCancelled { return .cancelled }
         do {
             let (summary, usage) = try await ai.generateSummary(
-                title: t.title, content: t.content, apiKey: apiKey, model: model
+                title: t.title, content: t.content,
+                category: t.category, apiKey: apiKey, model: model
             )
             // 调用后再检查一次取消：若 await 期间被取消，丢弃这次结果但仍计 cancelled（不是 failure）
             if _Concurrency.Task.isCancelled { return .cancelled }

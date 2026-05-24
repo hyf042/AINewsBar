@@ -21,11 +21,12 @@ struct RecommendItemView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
                         Text(article.feedTitle)
+                            .foregroundStyle(TextColor.secondaryWeak)
                         Spacer()
                         Text(formatArticleRelative(article.publishedAt))
+                            .foregroundStyle(TextColor.tertiary)
                     }
                     .font(Typography.caption)
-                    .foregroundStyle(TextColor.tertiary)
 
                     Text(article.title)
                         .font(article.isRead ? Typography.callout : Typography.calloutEmphasized)

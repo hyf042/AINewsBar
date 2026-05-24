@@ -64,6 +64,7 @@ macOS 菜单栏 AI 资讯阅读器。通过 `/grill-me` 技术访谈定义设计
 12. **Charts 内 BarMark / chartForegroundStyleScale 不动**（保留 SwiftUI Charts 默认）
 13. **修复同期发现 bug**（commit `4809064`）：`RelativeDateFormat` 内部 `Calendar.isDateInToday(date)` / `isDateInYesterday(date)` 忽略 `now` 参数，跨日 fixture 测试失败 → 改用 `startOfDay(for: now)` 手算 days，时钟注入语义闭环（踩坑 #32）
 14. **新增 DesignTokensTests** 3 个 Swift Testing 单测（token 实例化 + dynamic provider 双 appearance 验证用 `NSAppearance.performAsCurrentDrawingAppearance`）；全套 143/143 通过
+15. **TextColor 加中间档 `secondaryWeak = Color.primary.opacity(0.40)`**：浅色模式下 feed 来源名（"量子位"等）用 tertiary 26% 太淡看不清，但跳到 secondary 50% 又喧宾夺主。新增 40% 中间档，仅 `ArticleRowView` + `RecommendItemView` 的 `feedTitle` 使用；时间继续 tertiary 形成行内层级（先看来源后看时间）
 
 **位置：** `/Users/hyf042/Projects/AINewsBar`  
 **性质：** 个人工具，Swift Package Manager，macOS 14+，无 Xcode project 文件
@@ -109,7 +110,7 @@ macOS 菜单栏 AI 资讯阅读器。通过 `/grill-me` 技术访谈定义设计
 | 启动数据库容灾 | 二次构造失败 in-memory `ModelConfiguration` fallback，三次失败才 fatalError | 个人工具优先可用性：用户至少能看到菜单栏，本次会话数据不持久化；下次启动若磁盘恢复会自动重试持久化容器 |
 | 测试 Timer 清理 | RefreshService 暴露 `stop()` 清 timer + cancel refreshTask；测试 tearDown 显式调用 | Swift 5.9 不支持 `@MainActor isolated deinit`，无法在 deinit 兜底；singleton 生产侧不释放无需 deinit，仅测试需要 |
 | Typography 体系 | relative font 8 档（headline/stat/titleEmphasized/body/calloutEmphasized/callout/caption/captionEmphasized） | 跟随系统 Dynamic Type；ArticleRow 因 listHeight 写死保留 fixed `Font.system(size:13)` 作为已知 a11y trade-off |
-| Color token | TextColor 4 档（primary/secondary/tertiary/accent） + BrandColor accent/accentSoft/surfaceMuted | tertiary 用 `Color(nsColor: .tertiaryLabelColor)` 桥接（SwiftUI 无 Color.tertiary 静态属性）；BrandColor 用 `NSColor.dynamicProvider` + 原生 sRGB 避免 SwiftUI Color 桥接损失；surfaceMuted = `Color.primary.opacity(0.06)`（与 accent 路径不一致是"背景 vs 品牌"语义区别的合理后果） |
+| Color token | TextColor 5 档（primary/secondary/**secondaryWeak**/tertiary/accent） + BrandColor accent/accentSoft/surfaceMuted | tertiary 用 `Color(nsColor: .tertiaryLabelColor)` 桥接（SwiftUI 无 Color.tertiary 静态属性）；secondaryWeak = `Color.primary.opacity(0.40)` 为 feed 来源名提供"略显眼但不抢戏"中间档（介于 secondary 50% 与 tertiary 26%）；BrandColor 用 `NSColor.dynamicProvider` + 原生 sRGB 避免 SwiftUI Color 桥接损失；surfaceMuted = `Color.primary.opacity(0.06)` |
 | ProgressView scale 约定 | inline 收敛 2 档：big 0.7 (Header refresh) / small 0.55 (inline)，**不进 token** | 单点散点，token 化 ROI 低；plan §7 明确不交付 |
 | 区域背景 | `BrandColor.surfaceMuted` (6% Color.primary) 替换 `.quaternary` | 浅色模式三块灰背景叠加观感过重；6% 是肉眼可辨 + 不压迫的平衡点 |
 | 文章行未读指示 | 4pt orange leading dot（HStack 顶部对齐 padding 5pt），不加行底色 | 推荐区色条 + 文章行 dot 两套差异化方案：推荐有 index 数字占位，文章行结构更紧凑；dot 与色条同用 BrandColor.accent 视觉协调 |

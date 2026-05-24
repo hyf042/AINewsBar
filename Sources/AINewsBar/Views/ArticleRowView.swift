@@ -19,7 +19,7 @@ struct ArticleRowView: View {
                 HStack {
                     Text(article.feedTitle)
                         .font(Typography.caption)
-                        .foregroundStyle(TextColor.tertiary)
+                        .foregroundStyle(TextColor.secondaryWeak)
                     Spacer()
                     Text(formatArticleRelative(article.publishedAt))
                         .font(Typography.caption)

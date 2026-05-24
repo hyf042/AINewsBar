@@ -82,41 +82,71 @@ final class MockAI: AISummarizing, @unchecked Sendable {
     }
 }
 
+/// v2-multi-category: per-cat 字典存储。旧测试 fixture 通过 backward-compat
+/// helper 直接读 `prefs.digestContent` 等访问 .ai cat 状态（保持兼容）。
 final class InMemoryPrefs: PreferencesStoring {
     var apiKey: String? = "mock-api-key"
     var model: String = "mock-model"
-    var digestContent: String?
-    var digestDate: Date?
-    var digestArticleCount = 0
-    var recommendArticleCount = 0
+
+    // per-cat storage
+    private var digestContents: [AINewsBar.Category: String] = [:]
+    private var digestDates: [AINewsBar.Category: Date] = [:]
+    private var digestArticleCounts: [AINewsBar.Category: Int] = [:]
+    private var recommendArticleCounts: [AINewsBar.Category: Int] = [:]
+    private var _selectedTab: AINewsBar.Category = .ai
+    private var _settingsFeedsTab: AINewsBar.Category = .ai
+
+    // MARK: - Backward-compat helpers（.ai 快捷访问，旧测试 fixture 用）
+
+    var digestContent: String? {
+        get { digestContents[.ai] }
+        set { digestContents[.ai] = newValue }
+    }
+    var digestDate: Date? {
+        get { digestDates[.ai] }
+        set { digestDates[.ai] = newValue }
+    }
+    var digestArticleCount: Int {
+        get { digestArticleCounts[.ai] ?? 0 }
+        set { digestArticleCounts[.ai] = newValue }
+    }
+    var recommendArticleCount: Int {
+        get { recommendArticleCounts[.ai] ?? 0 }
+        set { recommendArticleCounts[.ai] = newValue }
+    }
+
+    // MARK: - 全局
 
     func getAPIKey() -> String? { apiKey }
     func getModel() -> String { model }
 
-    func loadDigest() -> (content: String, date: Date)? {
-        guard let c = digestContent, let d = digestDate else { return nil }
+    func loadSelectedTab() -> AINewsBar.Category { _selectedTab }
+    func saveSelectedTab(_ cat: AINewsBar.Category) { _selectedTab = cat }
+    func loadSettingsFeedsTab() -> AINewsBar.Category { _settingsFeedsTab }
+    func saveSettingsFeedsTab(_ cat: AINewsBar.Category) { _settingsFeedsTab = cat }
+
+    // MARK: - per-cat 新签名（旧签名由 protocol extension 自动 delegate 到 .ai）
+
+    func loadDigest(for cat: AINewsBar.Category) -> (content: String, date: Date)? {
+        guard let c = digestContents[cat], let d = digestDates[cat] else { return nil }
         return (c, d)
     }
-
-    func clearDigest() {
-        digestContent = nil
-        digestDate = nil
-        digestArticleCount = 0
+    func saveDigest(content: String, date: Date, for cat: AINewsBar.Category) {
+        digestContents[cat] = content
+        digestDates[cat] = date
     }
-
-    func clearRecommendState() {
-        recommendArticleCount = 0
+    func clearDigest(for cat: AINewsBar.Category) {
+        digestContents[cat] = nil
+        digestDates[cat] = nil
+        digestArticleCounts[cat] = 0
     }
-
-    func saveDigest(content: String, date: Date) {
-        digestContent = content
-        digestDate = date
+    func clearRecommendState(for cat: AINewsBar.Category) {
+        recommendArticleCounts[cat] = 0
     }
-
-    func loadDigestArticleCount() -> Int { digestArticleCount }
-    func saveDigestArticleCount(_ count: Int) { digestArticleCount = count }
-    func loadRecommendArticleCount() -> Int { recommendArticleCount }
-    func saveRecommendArticleCount(_ count: Int) { recommendArticleCount = count }
+    func loadDigestArticleCount(for cat: AINewsBar.Category) -> Int { digestArticleCounts[cat] ?? 0 }
+    func saveDigestArticleCount(_ count: Int, for cat: AINewsBar.Category) { digestArticleCounts[cat] = count }
+    func loadRecommendArticleCount(for cat: AINewsBar.Category) -> Int { recommendArticleCounts[cat] ?? 0 }
+    func saveRecommendArticleCount(_ count: Int, for cat: AINewsBar.Category) { recommendArticleCounts[cat] = count }
 }
 
 /// 测试用 UsageRecording —— 把每次 record 调用作为 RecordedEntry 累积，便于断言。

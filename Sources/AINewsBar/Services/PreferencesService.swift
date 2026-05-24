@@ -14,6 +14,8 @@ final class PreferencesService: PreferencesStoring {
         self.defaults = defaults
     }
 
+    // MARK: - 全局 API Key / Model（不动）
+
     func saveAPIKey(_ key: String) {
         defaults.set(key.isEmpty ? nil : key, forKey: apiKeyKey)
     }
@@ -35,51 +37,73 @@ final class PreferencesService: PreferencesStoring {
         defaults.string(forKey: modelKey) ?? Self.defaultModel
     }
 
-    // MARK: - Digest persistence
+    // MARK: - UI 状态（v2 新增全局 key）
 
-    private let digestContentKey = "com.ainewsbar.digest.content"
-    private let digestDateKey    = "com.ainewsbar.digest.date"
+    private let selectedTabKey = "com.ainewsbar.ui.selectedTab"
+    private let settingsFeedsTabKey = "com.ainewsbar.ui.settingsFeedsTab"
 
-    func saveDigest(content: String, date: Date) {
-        defaults.set(content, forKey: digestContentKey)
-        defaults.set(date, forKey: digestDateKey)
+    func loadSelectedTab() -> Category {
+        Category.from(rawValue: defaults.string(forKey: selectedTabKey))
     }
 
-    func loadDigest() -> (content: String, date: Date)? {
-        guard let content = defaults.string(forKey: digestContentKey),
-              let date = defaults.object(forKey: digestDateKey) as? Date else { return nil }
+    func saveSelectedTab(_ cat: Category) {
+        defaults.set(cat.rawValue, forKey: selectedTabKey)
+    }
+
+    func loadSettingsFeedsTab() -> Category {
+        Category.from(rawValue: defaults.string(forKey: settingsFeedsTabKey))
+    }
+
+    func saveSettingsFeedsTab(_ cat: Category) {
+        defaults.set(cat.rawValue, forKey: settingsFeedsTabKey)
+    }
+
+    // MARK: - per-cat key 拼接 helper
+
+    /// Key 模板：`com.ainewsbar.<base>.<cat>`
+    private func key(_ base: String, _ cat: Category) -> String {
+        "com.ainewsbar.\(base).\(cat.rawValue)"
+    }
+
+    // MARK: - Digest persistence (per-cat)
+
+    func saveDigest(content: String, date: Date, for cat: Category) {
+        defaults.set(content, forKey: key("digest.content", cat))
+        defaults.set(date, forKey: key("digest.date", cat))
+    }
+
+    func loadDigest(for cat: Category) -> (content: String, date: Date)? {
+        guard let content = defaults.string(forKey: key("digest.content", cat)),
+              let date = defaults.object(forKey: key("digest.date", cat)) as? Date else { return nil }
         return (content, date)
     }
 
-    func clearDigest() {
-        defaults.removeObject(forKey: digestContentKey)
-        defaults.removeObject(forKey: digestDateKey)
-        defaults.removeObject(forKey: digestArticleCountKey)
+    func clearDigest(for cat: Category) {
+        defaults.removeObject(forKey: key("digest.content", cat))
+        defaults.removeObject(forKey: key("digest.date", cat))
+        defaults.removeObject(forKey: key("digest.articleCount", cat))
     }
 
     /// 仅清推荐相关状态。caller 显式决定是否调（跨日重置 vs 当日保留）。
-    func clearRecommendState() {
-        defaults.removeObject(forKey: recommendArticleCountKey)
+    func clearRecommendState(for cat: Category) {
+        defaults.removeObject(forKey: key("recommend.articleCount", cat))
     }
 
-    // MARK: - Article count at last generation (Plan A: detect significant new summaries)
+    // MARK: - Article count at last generation (Plan A: detect significant new summaries) (per-cat)
 
-    private let digestArticleCountKey    = "com.ainewsbar.digest.articleCount"
-    private let recommendArticleCountKey = "com.ainewsbar.recommend.articleCount"
-
-    func saveDigestArticleCount(_ count: Int) {
-        defaults.set(count, forKey: digestArticleCountKey)
+    func saveDigestArticleCount(_ count: Int, for cat: Category) {
+        defaults.set(count, forKey: key("digest.articleCount", cat))
     }
 
-    func loadDigestArticleCount() -> Int {
-        defaults.integer(forKey: digestArticleCountKey)
+    func loadDigestArticleCount(for cat: Category) -> Int {
+        defaults.integer(forKey: key("digest.articleCount", cat))
     }
 
-    func saveRecommendArticleCount(_ count: Int) {
-        defaults.set(count, forKey: recommendArticleCountKey)
+    func saveRecommendArticleCount(_ count: Int, for cat: Category) {
+        defaults.set(count, forKey: key("recommend.articleCount", cat))
     }
 
-    func loadRecommendArticleCount() -> Int {
-        defaults.integer(forKey: recommendArticleCountKey)
+    func loadRecommendArticleCount(for cat: Category) -> Int {
+        defaults.integer(forKey: key("recommend.articleCount", cat))
     }
 }

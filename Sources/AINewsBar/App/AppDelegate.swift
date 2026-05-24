@@ -31,9 +31,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Schema 版本与 Migration
+
+    /// 当前 schema 版本。每次 schema 不兼容变更时升版本号触发主动全清。
+    /// v2-multi-category (2026-05-24)：引入 Category 维度，Article/Feed/UsageRecord 加字段。
+    private static let currentSchemaVersion = "v2-multi-category"
+
+    /// 永远保留的 prefs key（schema migration 不清理）。
+    /// API Key + Model：避免用户每次升级重填。
+    /// 其他系统 key（launchAtLogin / SwiftUI window 状态）通过"前缀白名单"自然保留。
+    private static let preservedPrefsKeys: Set<String> = [
+        "com.ainewsbar.claude-api-key",
+        "com.ainewsbar.model",
+    ]
+
+    /// schema 版本不匹配时主动清理：
+    /// 1. 删 SwiftData store（schema 不兼容）
+    /// 2. 用白名单方式清理 `com.ainewsbar.` 前缀业务 key（保留 API Key + Model）
+    /// 3. 非 `com.ainewsbar.` 前缀的 key（如 launchAtLogin / SwiftUI 状态）自然保留
+    /// 4. 标记首次启动（Phase 4 据此仅触发 AI cat）
+    /// 用户决策：无数据迁移需求，全清接受。
+    private static func performSchemaMigrationIfNeeded() {
+        let defaults = UserDefaults.standard
+        let stored = defaults.string(forKey: "schemaVersion")
+        guard stored != currentSchemaVersion else { return }
+
+        Log.write("[Migration] schema version mismatch: \(stored ?? "nil") → \(currentSchemaVersion), wiping...")
+
+        // 1. 删 SwiftData store（含 -shm / -wal sidecars）
+        for suffix in ["", "-shm", "-wal"] {
+            let url = URL.applicationSupportDirectory.appending(path: "default.store\(suffix)")
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        // 2. 白名单清理：删 `com.ainewsbar.` 前缀且非保留项的 key
+        // 这样：API Key + Model 保留；旧 digest/recommend 业务 key 清掉；
+        // 非 `com.ainewsbar.` 前缀的系统 key (launchAtLogin / SwiftUI window 状态) 自然保留
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.ainewsbar.app"
+        let allKeys = defaults.persistentDomain(forName: bundleID)?.keys ?? Dictionary<String, Any>().keys
+        var removed = 0
+        for key in allKeys where key.hasPrefix("com.ainewsbar.") && !preservedPrefsKeys.contains(key) {
+            defaults.removeObject(forKey: key)
+            removed += 1
+        }
+
+        // 3. 写新版本号 + 标记首次启动
+        defaults.set(currentSchemaVersion, forKey: "schemaVersion")
+        defaults.set(true, forKey: "firstLaunchAfterSchemaUpgrade")
+
+        Log.write("[Migration] wipe complete; removed \(removed) old prefs keys; API Key+Model preserved; firstLaunch flag set")
+    }
+
     // MARK: - Container 构造（含迁移失败重建路径 + in-memory fallback）
 
     private static func makeContainer() -> ModelContainer {
+        // 优先做 schema 版本检测；不匹配则主动清 store/prefs，再继续走构造路径
+        performSchemaMigrationIfNeeded()
+
         let schema = Schema([Feed.self, Article.self, UsageRecord.self])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {

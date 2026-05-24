@@ -102,6 +102,7 @@ struct UsageSettingsView: View {
         case .summary: return "摘要"
         case .recommend: return "推荐"
         case .digest: return "日报"
+        case .filter: return "筛选"
         }
     }
 

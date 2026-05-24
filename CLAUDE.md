@@ -4,6 +4,8 @@
 
 macOS 菜单栏 AI 资讯阅读器。通过 `/grill-me` 技术访谈定义设计决策，从零完成全部实现（截至 2026-05-20 所有功能已完成并可运行）。当日通过第二次 `/grill-me` 16 轮访谈完成 4 项 ROI 最高的重构（错误治理/视图拆分/外观模式/全表 fetch 优化），详见 `docs/plans/optimization-plan.md`。
 
+> **工作流约束（2026-05-24 起）**：本工程**不使用 superpowers 系列 skill**（`superpowers:*`，含 `writing-plans` / `executing-plans` / `subagent-driven-development` / `brainstorming` / `using-superpowers` 等）。规划/执行/code review 走通用流程（`/grill-me` 访谈 + 直接编辑实现 + 必要时手动调度 subagent），spec/plan 文档不再放 `docs/superpowers/`，需要时落 `docs/plans/`。
+
 **2026-05-21 增量**：
 1. **每日 AI Token 用量统计**（grill 7 轮设计）：明细级 SwiftData 记录、按场景拆分（summary/recommend/digest）、滚动 30 天保留、Footer "今日 X tokens" + Settings "用量" Tab（今日卡片 + 7/30 天堆叠柱图）。失败调用 tokens=0/success=false。
 2. **Linus 标准 review 5 项修复**（详见踩坑 #13/#14/#15）：
@@ -45,7 +47,7 @@ macOS 菜单栏 AI 资讯阅读器。通过 `/grill-me` 技术访谈定义设计
    - `RefreshService` 暴露 `stop()` 清 timer + cancel refreshTask；测试 tearDown 显式调用（踩坑 #30：Swift 5.9 不支持 `@MainActor isolated deinit`）
    - `MockAI` 计数器加 `NSLock + withLock` 保护（旧 `var summaryCallCount` 在 5 并发下数据丢失让测试虚假通过，踩坑 #31）
 
-**2026-05-23 增量**：UI 样式 token 化（spec/plan 在 `docs/superpowers/`，commit `363c5f2` → `59fd048` → `e1e75d4`）。流程：grill 8 轮访谈 → spec v1→v2→v3（2 轮 architect review）→ plan v1（1 轮 review）→ subagent-driven 执行（Phase 1-3）+ Phase 4 验证。
+**2026-05-23 增量**：UI 样式 token 化（commit `363c5f2` → `59fd048` → `e1e75d4`）。流程：grill 8 轮访谈 → spec v1→v2→v3（2 轮 architect review）→ plan v1（1 轮 review）→ 分阶段执行（Phase 1-3）+ Phase 4 验证。原 spec/plan 文档已随 superpowers 工作流一起清理（2026-05-24），决策摘要见下方"设计决策记录"表 Typography / Color token / 区域背景 / 文章行未读指示 等行。
 
 1. **DesignTokens 目录**：`Sources/AINewsBar/DesignTokens/` 新建 3 个 token enum
    - `Typography` 8 档：headline / stat / titleEmphasized / body / calloutEmphasized / callout / caption / captionEmphasized（全 relative font 跟随 Dynamic Type；captionEmphasized 锁定 bold trait）

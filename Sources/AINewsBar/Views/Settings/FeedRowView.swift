@@ -87,6 +87,7 @@ struct BuiltInFeedRowView: View {
     @EnvironmentObject private var refreshService: RefreshService
     @State private var saveErrorMessage = ""
     @State private var showSaveErrorAlert = false
+    @State private var isRevertingEnabledChange = false
     let checkStatus: CheckStatus
     let onCheck: () async -> Void
 
@@ -116,7 +117,13 @@ struct BuiltInFeedRowView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.small)
-                .onChange(of: feed.isEnabled) { _, enabled in handleToggle(enabled: enabled) }
+                .onChange(of: feed.isEnabled) { oldValue, enabled in
+                    if isRevertingEnabledChange {
+                        isRevertingEnabledChange = false
+                        return
+                    }
+                    handleToggle(enabled: enabled, revertingTo: oldValue)
+                }
         }
         .padding(.vertical, 2)
         .alert("保存失败", isPresented: $showSaveErrorAlert) {
@@ -163,19 +170,20 @@ struct BuiltInFeedRowView: View {
         }
     }
 
-    private func handleToggle(enabled: Bool) {
-        let feedID = feed.id
-        if !enabled {
-            let articles = modelContext.safeFetch(
-                FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
-            )
-            articles.forEach { modelContext.delete($0) }
-        }
-        modelContext.safeSave()
-        if enabled {
-            let service = refreshService
-            let cat = AINewsBar.Category.from(rawValue: feed.category)
-            Task { await service.refresh(cat) }
+    private func handleToggle(enabled: Bool, revertingTo oldValue: Bool) {
+        do {
+            try FeedSettingsStore.persistBuiltInEnabledChange(feed: feed, enabled: enabled, in: modelContext)
+            if enabled {
+                let service = refreshService
+                let cat = AINewsBar.Category.from(rawValue: feed.category)
+                Task { await service.refresh(cat) }
+            }
+        } catch {
+            modelContext.rollback()
+            isRevertingEnabledChange = true
+            feed.isEnabled = oldValue
+            saveErrorMessage = error.localizedDescription
+            showSaveErrorAlert = true
         }
     }
 }

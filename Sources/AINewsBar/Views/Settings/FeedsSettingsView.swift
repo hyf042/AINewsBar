@@ -8,6 +8,8 @@ struct FeedsSettingsView: View {
     @State private var checkResults: [UUID: CheckStatus] = [:]
     @State private var isCheckingAll = false
     @State private var showAddSheet = false
+    @State private var deleteErrorMessage = ""
+    @State private var showDeleteErrorAlert = false
 
     /// 当前 picker 选中 cat 的 feeds
     private var filteredFeeds: [Feed] {
@@ -69,8 +71,7 @@ struct FeedsSettingsView: View {
                     }
                     .onDelete { indexSet in
                         let custom = filteredFeeds.filter { !$0.isBuiltIn }
-                        indexSet.map { custom[$0] }.forEach { modelContext.delete($0) }
-                        modelContext.safeSave()
+                        deleteCustomFeeds(indexSet.map { custom[$0] })
                     }
                 }
             }
@@ -97,6 +98,11 @@ struct FeedsSettingsView: View {
             // v2: AddFeedSheet default cat = 当前 picker 选中
             AddFeedSheet(isPresented: $showAddSheet, defaultCategory: selectedCategory)
         }
+        .alert("删除失败", isPresented: $showDeleteErrorAlert) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(deleteErrorMessage)
+        }
     }
 
     private func checkFeed(_ feed: Feed) async {
@@ -108,6 +114,16 @@ struct FeedsSettingsView: View {
                 : .success(articles.count)
         } catch {
             checkResults[feed.id] = .failure(error.localizedDescription)
+        }
+    }
+
+    private func deleteCustomFeeds(_ feeds: [Feed]) {
+        do {
+            try FeedSettingsStore.deleteCustomFeeds(feeds, in: modelContext)
+        } catch {
+            modelContext.rollback()
+            deleteErrorMessage = error.localizedDescription
+            showDeleteErrorAlert = true
         }
     }
 

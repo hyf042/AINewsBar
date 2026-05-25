@@ -68,7 +68,7 @@ actor RSSService: RSSFetching {
         case .atom(let atom):
             return atom.entries?.compactMap { entry in
                 guard let title = entry.title,
-                      let link = entry.links?.first?.attributes?.href else { return nil }
+                      let link = preferredAtomLink(entry.links) else { return nil }
                 return RawArticle(title: title, url: link, content: entry.summary?.value,
                                   publishedAt: entry.published ?? entry.updated)
             } ?? []
@@ -78,5 +78,26 @@ actor RSSService: RSSFetching {
                 return RawArticle(title: title, url: link, content: item.contentText, publishedAt: item.datePublished)
             } ?? []
         }
+    }
+
+    private static func preferredAtomLink(_ links: [AtomFeedEntryLink]?) -> String? {
+        guard let links else { return nil }
+
+        let alternateHTML = links.first { link in
+            guard link.attributes?.href != nil else { return false }
+            let rel = link.attributes?.rel?.lowercased()
+            let type = link.attributes?.type?.lowercased()
+            let isAlternate = rel == nil || rel == "alternate"
+            let isHTML = type == nil || type == "text/html" || type == "application/xhtml+xml"
+            return isAlternate && isHTML
+        }
+        if let href = alternateHTML?.attributes?.href { return href }
+
+        let alternate = links.first { link in
+            guard link.attributes?.href != nil else { return false }
+            let rel = link.attributes?.rel?.lowercased()
+            return rel == nil || rel == "alternate"
+        }
+        return alternate?.attributes?.href ?? links.first(where: { $0.attributes?.href != nil })?.attributes?.href
     }
 }

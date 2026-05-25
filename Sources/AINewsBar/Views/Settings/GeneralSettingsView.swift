@@ -3,6 +3,9 @@ import ServiceManagement
 
 struct GeneralSettingsView: View {
     @AppStorage("launchAtLogin") private var launchAtLogin = false
+    @State private var launchAtLoginErrorMessage = ""
+    @State private var showLaunchAtLoginErrorAlert = false
+    @State private var isRevertingLaunchAtLogin = false
 
     /// v2.1: per-cat 后台自动刷新开关。@State 镜像 prefs 让 SwiftUI bind；
     /// onAppear 从 prefs 恢复；onChange 写回 prefs。
@@ -14,8 +17,12 @@ struct GeneralSettingsView: View {
         Form {
             Section("启动") {
                 Toggle("开机时自动启动", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, enabled in
-                        toggleLaunchAtLogin(enabled)
+                    .onChange(of: launchAtLogin) { oldValue, enabled in
+                        if isRevertingLaunchAtLogin {
+                            isRevertingLaunchAtLogin = false
+                            return
+                        }
+                        toggleLaunchAtLogin(enabled, revertingTo: oldValue)
                     }
             }
             Section {
@@ -46,13 +53,25 @@ struct GeneralSettingsView: View {
             autoRefreshEarnings = prefs.loadAutoRefreshEnabled(for: .earnings)
             autoRefreshNews = prefs.loadAutoRefreshEnabled(for: .news)
         }
+        .alert("设置失败", isPresented: $showLaunchAtLoginErrorAlert) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(launchAtLoginErrorMessage)
+        }
     }
 
-    private func toggleLaunchAtLogin(_ enabled: Bool) {
-        if enabled {
-            try? SMAppService.mainApp.register()
-        } else {
-            try? SMAppService.mainApp.unregister()
+    private func toggleLaunchAtLogin(_ enabled: Bool, revertingTo oldValue: Bool) {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            isRevertingLaunchAtLogin = true
+            launchAtLogin = oldValue
+            launchAtLoginErrorMessage = error.localizedDescription
+            showLaunchAtLoginErrorAlert = true
         }
     }
 }

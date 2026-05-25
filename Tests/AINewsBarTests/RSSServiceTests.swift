@@ -54,6 +54,30 @@ final class RSSServiceTests: XCTestCase {
         XCTAssertNotNil(articles.first?.publishedAt)
     }
 
+    func testAtomPrefersAlternateHTMLLinkOverSelfLink() throws {
+        let xml = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Example</title>
+          <id>https://example.com/</id>
+          <updated>2026-05-25T00:00:00Z</updated>
+          <entry>
+            <title>Atom item</title>
+            <id>https://example.com/1</id>
+            <link rel="self" type="application/atom+xml" href="https://example.com/feed-entry.xml"/>
+            <link rel="alternate" type="text/html" href="https://example.com/articles/1"/>
+            <updated>2026-05-25T12:34:56Z</updated>
+            <summary>Hello</summary>
+          </entry>
+        </feed>
+        """
+        let feed = try FeedParser(data: Data(xml.utf8)).parse().get()
+
+        let articles = RSSService.extract(from: feed)
+
+        XCTAssertEqual(articles.first?.url, "https://example.com/articles/1")
+    }
+
     func testHTTPStatusErrorThrownBeforeParsing() async {
         HTTPStatusURLProtocol.statusCode = 429
         HTTPStatusURLProtocol.body = Data("too many requests".utf8)

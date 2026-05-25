@@ -171,9 +171,21 @@ struct MenuBarView: View {
 
     private func openArticle(_ article: Article) {
         guard let url = URL(string: article.url) else { return }
-        NSWorkspace.shared.open(url)
+        guard NSWorkspace.shared.open(url) else {
+            Log.write("[Open] failed to open article URL: \(article.url)")
+            return
+        }
+        guard !article.isRead else { return }
+        let wasRead = article.isRead
         article.isRead = true
-        modelContext.safeSave()
+        do {
+            try modelContext.safeSaveOrThrow()
+        } catch {
+            modelContext.rollback()
+            article.isRead = wasRead
+            Log.write("[Open] failed to persist read state for article \(article.id): \(error)")
+            return
+        }
         refreshService.postUnreadCount(context: modelContext)
     }
 }

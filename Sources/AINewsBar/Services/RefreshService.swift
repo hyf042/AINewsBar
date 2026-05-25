@@ -295,11 +295,17 @@ final class RefreshService: ObservableObject {
         cleanupOldArticles(context: context, category: cat, before: startOfToday)
 
         let catRaw = cat.rawValue
-        let feeds = context.safeFetch(
-            FetchDescriptor<Feed>(predicate: #Predicate {
-                $0.isEnabled == true && $0.category == catRaw
-            })
-        )
+        let feeds: [Feed]
+        do {
+            feeds = try context.safeFetchOrThrow(
+                FetchDescriptor<Feed>(predicate: #Predicate {
+                    $0.isEnabled == true && $0.category == catRaw
+                })
+            )
+        } catch {
+            mutate(cat) { $0.lastError = "数据库查询订阅源失败，跳过本次刷新" }
+            return
+        }
 
         let existingURLs: Set<String>
         do {

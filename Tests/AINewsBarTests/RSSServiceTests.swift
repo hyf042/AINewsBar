@@ -123,4 +123,53 @@ final class RSSServiceTests: XCTestCase {
         XCTAssertEqual(HTTPStatusURLProtocol.receivedUserAgent, RSSService.userAgent)
         XCTAssertTrue(HTTPStatusURLProtocol.receivedAccept?.contains("application/rss+xml") == true)
     }
+
+    // MARK: - Scheme allowlist (第六轮 review)
+
+    /// 非 http/https 的 RSS 源 URL 必须在网络请求前被拒绝。
+    /// 防止 file://、javascript:、shell: 等 scheme 从 RSS 注入路径进入应用。
+    func testFetchRejectsNonHttpScheme() async {
+        let service = RSSService()
+        let badURLs = [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "ftp://example.com/feed.xml",
+            "shell:open"
+        ]
+        for badURL in badURLs {
+            do {
+                _ = try await service.fetchRawArticles(feedURL: badURL)
+                XCTFail("expected non-http(s) URL '\(badURL)' to be rejected")
+            } catch let urlError as URLError {
+                XCTAssertEqual(urlError.code, .unsupportedURL,
+                               "expected .unsupportedURL for '\(badURL)', got \(urlError.code)")
+            } catch {
+                XCTFail("expected URLError for '\(badURL)', got \(error)")
+            }
+        }
+    }
+
+    /// http 与 https 必须被接受（接受不等于成功 — 这里靠 URLProtocol 命中后才知道）。
+    /// 通过断言"未在 scheme 守卫上失败"间接验证 allowlist 没误伤合法 scheme。
+    func testFetchAcceptsHttpAndHttps() async {
+        HTTPStatusURLProtocol.statusCode = 200
+        HTTPStatusURLProtocol.body = Data("""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel><title>Example</title></channel></rss>
+        """.utf8)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HTTPStatusURLProtocol.self]
+        let service = RSSService(session: URLSession(configuration: config))
+
+        // 不抛 .unsupportedURL 即说明 scheme 通过；http / https 都试一次
+        for goodURL in ["http://example.com/feed.xml", "https://example.com/feed.xml"] {
+            do {
+                _ = try await service.fetchRawArticles(feedURL: goodURL)
+            } catch let urlError as URLError where urlError.code == .unsupportedURL {
+                XCTFail("legitimate scheme '\(goodURL)' incorrectly rejected")
+            } catch {
+                // 其他错误（解析空 RSS / FeedKit）不算 scheme 拒绝，可接受
+            }
+        }
+    }
 }

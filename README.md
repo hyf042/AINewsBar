@@ -251,6 +251,18 @@ review 后又补一轮 6 项设置持久化与外部边界硬化：
 
 测试 +2 (214 → 216)：`testApplyCredentialChangeClearsErrorsAndTriggersAllCats` + `testApplyCredentialChangeResetsAnyUnavailableToUnknown`。
 
+### 第六轮 review（5 项 P2/P3）
+
+| 等级 | 项 | 修复 |
+|---|---|---|
+| 🟠 P2 | APISettings 错值覆盖好配置 | saveAndCheck 先 testConnection 局部 apiKey/model，成功才持久化；失败 prefs 不动 |
+| 🟠 P2 | RSS / 打开文章 scheme | RSSService 与 openArticle 都 guard `http/https`，拒绝 file://、javascript:、shell: |
+| 🟡 P3 | AddFeed try? fetch false-empty | strict `try modelContext.fetch`；失败弹"保存失败"；URL/title trim 后再存 |
+| 🟡 P3 | applyCredentialChange 误清 | 静态 `missingCredentialReason`，精确比对，**只清** credential 那一条；business reason 保留到下次 refresh 重判 |
+| 🟡 P3 | AddFeed 成功不触发 refresh | 保存成功后 fire-and-forget `service.refresh(selectedCategory)`，绕过 staleThreshold |
+
+测试 +3 (216 → 219)：`testFetchRejectsNonHttpScheme` + `testFetchAcceptsHttpAndHttps` + applyCredential 精确化拆 2 个（净 +1）。
+
 ## 设计文档
 
 - `CLAUDE.md` — 完整工作记录与设计决策表（含 38 条踩坑记录）

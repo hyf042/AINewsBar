@@ -116,11 +116,31 @@ struct APISettingsView: View {
         }
     }
 
+    /// P2 第六轮 review：**先验证候选值，成功后才持久化**。
+    /// 旧路径先 saveAPIKey/saveModel 再 testConnection —— 用户手滑输错就把上一套
+    /// 可用配置覆盖了，主流程从下次 refresh 起也用坏配置。
+    /// 新路径：失败时 prefs 完全不动，主 UI 仍用旧 key（可能可用）继续工作。
     @MainActor
     private func saveAndCheck() async {
-        PreferencesService.shared.saveAPIKey(apiKey)
-        PreferencesService.shared.saveModel(effectiveModel)
-        await checkConnection()
+        guard !apiKey.isEmpty, !effectiveModel.isEmpty else { return }
+        checkStatus = .checking
+        do {
+            try await BailianService.shared.testConnection(apiKey: apiKey, model: effectiveModel)
+            // 验证通过 → 持久化
+            PreferencesService.shared.saveAPIKey(apiKey)
+            PreferencesService.shared.saveModel(effectiveModel)
+            checkStatus = .success(1)
+            // 触发 onboarding 路径：清 credential 错误 + 顺序刷新三 cat
+            let service = refreshService
+            Task { await service.applyCredentialChange() }
+        } catch {
+            // 验证失败 → 不动 prefs（保留上一套可用配置）
+            checkStatus = .failure(error.localizedDescription)
+            // 主动 set globalAIError 让主 UI 看到"当前输入这组 credential 不可用"；
+            // 若旧 key 可用，下次 refresh 的 clearGlobalAIErrorAfterAISuccess 会清掉
+            refreshService.globalAIError = GlobalAIError.from(error)
+                ?? .other(error.localizedDescription)
+        }
     }
 
     @MainActor
@@ -130,18 +150,12 @@ struct APISettingsView: View {
         do {
             try await BailianService.shared.testConnection(apiKey: apiKey, model: effectiveModel)
             checkStatus = .success(1)
-            // P2 onboarding 断点修复：testConnection 成功后走 applyCredentialChange，
-            // 它会清 globalAIError + 重置 credential 相关 per-cat unavailable +
-            // 顺序触发三 cat refresh（绕过 staleThreshold；旧路径靠 refreshIfNeeded
-            // 时间阈值 + tab lazy load 都不会在 lastRefreshDate 非 nil 时触发）。
-            // fire-and-forget：用户不必在设置页等三 cat 跑完。
-            let service = refreshService
-            Task { await service.applyCredentialChange() }
+            // 仅测试通过，不持久化（按钮语义是"检测可用性"）
+            // testConnection 成功是全局信号：清 global error。per-cat aiAvailability
+            // 不在此 set —— 由下次各 cat 自己的 refresh 自然修正。
+            refreshService.globalAIError = nil
         } catch {
             checkStatus = .failure(error.localizedDescription)
-            // P3-A: 失败时主动 set globalAIError，让菜单主 UI 立即看到状态
-            // （而不是等下一轮 refresh）。401/403 映射到 invalidAPIKey/forbidden；
-            // 其他错误降级为 .other(localizedDescription)，与 banner UI 复用同套路径。
             refreshService.globalAIError = GlobalAIError.from(error)
                 ?? .other(error.localizedDescription)
         }

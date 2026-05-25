@@ -230,25 +230,43 @@ final class RefreshServiceUsageTests: XCTestCase {
         }
     }
 
-    /// non-credential 类型的 unavailable 不应被 applyCredentialChange 误清。
-    /// 例如"摘要调用多数失败"，与 credential 无关，重置反而掩盖真实问题。
-    /// 实测：applyCredentialChange 把所有 .unavailable → .unknown，再各 cat 跑
-    /// refresh。如果没有 feeds（本测试设定）AI pipeline 不会跑，aiAvailability
-    /// 会保持 .unknown —— 这与"被 credential 路径错误覆盖业务错误"等价。
-    /// 这是已知 trade-off：保守清空让后续 refresh 重判，避免硬编码"哪些 reason 是 credential"。
-    func testApplyCredentialChangeResetsAnyUnavailableToUnknown() async {
+    /// non-credential unavailable（如"摘要调用多数失败"/"摘要保存失败"/"数据库查询失败"）
+    /// 不应被 applyCredentialChange 误清。
+    /// 这些是真实业务错误，与 credential 无关，重置反而让 UI 失去"为什么 AI 不可用"信号。
+    /// 第六轮 review 精确化：仅当 reason 完全等于 `missingCredentialReason` 才清。
+    func testApplyCredentialChangePreservesNonCredentialUnavailable() async {
         prefs.apiKey = "key"
+        let businessError = "摘要调用多数失败 (3/3)"
         service._testMutate(for: .ai) {
-            $0.aiAvailability = .unavailable("摘要调用多数失败 (3/3)")
+            $0.aiAvailability = .unavailable(businessError)
         }
 
         await service.applyCredentialChange()
 
-        // 因 .ai cat 无 enabled feed，refresh 不会重设；此处验证至少不再 stale
-        // 残留 "摘要调用多数失败" 这条 — 等下次真实 refresh 会重判
+        // refresh 无 enabled feed 不会重设，应保留业务 reason；如果 reason 被误清
+        // 成 .unknown 表示精确匹配失效，会掩盖真实业务问题
+        guard case .unavailable(let reason) = service.state(for: .ai).aiAvailability else {
+            XCTFail("expected non-credential .unavailable to be preserved, got \(service.state(for: .ai).aiAvailability)")
+            return
+        }
+        XCTAssertEqual(reason, businessError,
+                       "非 credential 业务错误必须保留，不能被 applyCredentialChange 清掉")
+    }
+
+    /// credential reason 必须精确匹配 RefreshService.missingCredentialReason
+    /// 才会被 applyCredentialChange 重置；保证 ensureCredentials 与 applyCredentialChange
+    /// 两端 reason 不漂移。
+    func testApplyCredentialChangeClearsExactCredentialReason() async {
+        prefs.apiKey = "key"
+        service._testMutate(for: .ai) {
+            $0.aiAvailability = .unavailable(RefreshService.missingCredentialReason)
+        }
+
+        await service.applyCredentialChange()
+
         if case .unavailable(let reason) = service.state(for: .ai).aiAvailability {
-            XCTAssertFalse(reason.contains("摘要调用多数失败"),
-                           "applyCredentialChange 后旧业务错误仍残留")
+            XCTAssertNotEqual(reason, RefreshService.missingCredentialReason,
+                              "credential reason 必须被清除")
         }
     }
 }

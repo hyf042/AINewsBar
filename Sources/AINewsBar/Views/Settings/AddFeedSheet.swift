@@ -3,6 +3,7 @@ import SwiftData
 
 struct AddFeedSheet: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var refreshService: RefreshService
     @Binding var isPresented: Bool
     /// v2: 默认 cat 来自父 view 当前选中的 Picker；用户可下拉改
     let defaultCategory: AINewsBar.Category
@@ -116,23 +117,42 @@ struct AddFeedSheet: View {
     }
 
     private func addFeed() {
-        // P3 review：按 normalized URL 去重。重复 feed 会重复抓 RSS、设置页重复显示、
-        // 失败统计重复噪声；按 article URL 去重的下游路径救不了上游重复 fetch。
-        // 不做"订阅合并"复杂方案 —— 拒绝即可，用户改 URL 或先删旧的。
+        // P3 第六轮 review #1：strict fetch 去重 —— 旧 `try? fetch ?? []` 会让
+        // DB 查询失败被当成"没有重复"，false-empty 写路径。fetch 失败必须中止保存，
+        // 别静默插入可能导致用户数据出问题。
         let normalized = Self.normalize(url)
-        let existing = (try? modelContext.fetch(FetchDescriptor<Feed>())) ?? []
+        let existing: [Feed]
+        do {
+            existing = try modelContext.fetch(FetchDescriptor<Feed>())
+        } catch {
+            saveErrorMessage = "查询现有订阅源失败，请重试：\(error.localizedDescription)"
+            showSaveErrorAlert = true
+            return
+        }
         if let dupe = existing.first(where: { Self.normalize($0.url) == normalized }) {
             saveErrorMessage = "已存在相同 URL 的订阅源（\(dupe.title)），请勿重复添加"
             showSaveErrorAlert = true
             return
         }
 
-        let feed = Feed(title: title, url: url,
+        // P3 第六轮 review #1：trim 后再存，避免空白被持久化。验证路径（validateAndAdd
+        // 走 RSSService.fetch）也 trim 后送出会更彻底，但 RSSService 已加 scheme 校验
+        // 上游兜底；这里只对存盘 URL 做最小 normalize（保留 case 与 query）。
+        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let feed = Feed(title: trimmedTitle, url: trimmedURL,
                         isBuiltIn: false, category: selectedCategory)
         modelContext.insert(feed)
         do {
             try modelContext.safeSaveOrThrow()
+            // P3 第六轮 review #3：保存成功后触发该分类刷新。
+            // 旧路径仅关闭 sheet；若该 tab 刚刷新过，lastRefreshDate 会挡住 lazy
+            // refresh —— 用户加完源等不到新文章，体感像"加了没用"。
+            // refresh(_:) 走 inflight 复用，与正在跑的刷新合并，不会双开 AI。
+            let service = refreshService
+            let cat = selectedCategory
             isPresented = false
+            Task { await service.refresh(cat) }
         } catch {
             modelContext.rollback()
             saveErrorMessage = error.localizedDescription
@@ -140,7 +160,7 @@ struct AddFeedSheet: View {
         }
     }
 
-    /// URL 规范化：去首尾空白 / 小写 / 去尾斜杠。
+    /// URL 规范化（仅用于去重比对，不用于存盘）：去首尾空白 / 小写 / 去尾斜杠。
     /// 不去 protocol：http vs https 是真不同（前者明文）；不去 query：?format=rss 有意义。
     /// 故意保守 —— 误拒绝比误合并好（用户能改 URL 重试，合并坏数据无法回滚）。
     private static func normalize(_ url: String) -> String {

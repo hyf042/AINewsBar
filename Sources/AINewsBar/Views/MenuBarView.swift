@@ -193,7 +193,14 @@ struct MenuBarView: View {
     // MARK: - Actions
 
     private func openArticle(_ article: Article) {
-        guard let url = URL(string: article.url) else { return }
+        // P2 第六轮 review：文章 URL 源自外部 RSS，NSWorkspace.open 不能开 file://、
+        // javascript:、shell: 等任意 scheme。这是个简单的攻击面收紧。
+        guard let url = URL(string: article.url),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            Log.write("[Open] refusing non-http(s) URL: \(article.url)")
+            return
+        }
         guard NSWorkspace.shared.open(url) else {
             Log.write("[Open] failed to open article URL: \(article.url)")
             return

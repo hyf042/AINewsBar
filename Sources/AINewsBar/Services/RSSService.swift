@@ -40,8 +40,12 @@ actor RSSService: RSSFetching {
     }
 
     func fetchRawArticles(feedURL: String) async throws -> [RawArticle] {
-        guard let url = URL(string: feedURL) else {
-            throw URLError(.badURL)
+        // P2 第六轮 review：RSS 源 URL 是外部输入（用户输 / RSS 源管理后端 / migration），
+        // 仅允许 http/https。拒绝 file://、javascript:、shell: 等 scheme。
+        guard let url = URL(string: feedURL),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            throw URLError(.unsupportedURL)
         }
 
         var request = URLRequest(url: url)

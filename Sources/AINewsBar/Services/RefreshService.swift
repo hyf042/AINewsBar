@@ -137,6 +137,11 @@ final class RefreshService: ObservableObject {
     private let usageRetentionDays = 30
     private let filterMaxFailures = 3
 
+    /// per-cat aiAvailability=.unavailable 的"未配置 API Key" reason 唯一文案。
+    /// applyCredentialChange 精确比对这一条 —— 不能误清"摘要调用多数失败/摘要保存失败"等
+    /// non-credential 业务错误（误清会掩盖真实问题，等下一轮 refresh 才能重判）。
+    static let missingCredentialReason = "未配置 API Key"
+
     // MARK: - Mutable
 
     private var timer: Timer?
@@ -234,8 +239,10 @@ final class RefreshService: ObservableObject {
     ///
     /// 本方法两步：
     /// 1. 清 credential 相关错误：globalAIError + per-cat aiAvailability=.unavailable
-    ///    重置为 .unknown（让下次 refresh 自然重判，不预设 .available 避免与真实
-    ///    状态分裂）。non-credential unavailable（如"摘要调用多数失败"）不在此清除。
+    ///    且 reason **完全等于** `missingCredentialReason` ("未配置 API Key") 才重置为
+    ///    .unknown（让下次 refresh 自然重判）。
+    ///    精确匹配是关键：non-credential unavailable（如"摘要调用多数失败"/"摘要保存失败"/
+    ///    "数据库查询失败"）不能被这里误清，否则真业务错误被掩盖到下一轮 refresh。
     /// 2. 顺序 await refresh(_:) 三 cat：refresh 路径绕过 staleThreshold；
     ///    per-cat refreshTasks inflight 复用保证与其他入口安全共存。
     ///
@@ -244,7 +251,8 @@ final class RefreshService: ObservableObject {
     func applyCredentialChange() async {
         globalAIError = nil
         for cat in AINewsBar.Category.allCases {
-            if case .unavailable = state(for: cat).aiAvailability {
+            if case .unavailable(let reason) = state(for: cat).aiAvailability,
+               reason == Self.missingCredentialReason {
                 mutate(cat) { $0.aiAvailability = .unknown }
             }
         }
@@ -846,7 +854,8 @@ final class RefreshService: ObservableObject {
     private func ensureCredentials(cat: AINewsBar.Category) -> (apiKey: String, model: String)? {
         guard let creds = currentCredentials() else {
             globalAIError = .invalidAPIKey
-            mutate(cat) { $0.aiAvailability = .unavailable("未配置 API Key") }
+            // applyCredentialChange 依赖此 reason 字面值精确匹配（Self.missingCredentialReason）
+            mutate(cat) { $0.aiAvailability = .unavailable(Self.missingCredentialReason) }
             return nil
         }
         if globalAIError == .invalidAPIKey { globalAIError = nil }

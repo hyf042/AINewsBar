@@ -28,7 +28,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-25 深夜 (三) | 第四轮 review 4 项：auto path 并发→顺序（QPS 15→5）/ postUnreadCount 失败保留 badge / startupError 拆出与 globalAIError 隔离 / recommendCount 真正接入配置 | `496d4a6` |
 | 2026-05-25 深夜 (四) | 第五轮 review 4 项：onboarding 断点修复（applyCredentialChange）/ feed 禁用/删除后 badge 同步 / AddFeedSheet URL 去重 / ArticleSnapshot 旧 tolerant API 删除；测试 214 → 216 | `8761c22` |
 | 2026-05-25 深夜 (五) | 第六轮 review 5 项：APISettings 验后保存 / RSS+open 文章 scheme 校验 / AddFeed strict fetch 去重 + trim URL / applyCredentialChange 精确 reason 匹配 / AddFeed 成功触发 refresh；测试 216 → 219 (+RSS scheme +applyCredential 精确化拆 2) | `8866473` |
-| 2026-05-25 深夜 (六) | 第七轮 review 4 项：FilterPipeline 拆 transient vs classification（财报永久 reject 漏洞）/ Filter 后补 postUnreadCount / 检测可用性按钮不动 globalAIError / BuiltInFeeds 插入扫全表去重；测试 219 → 222 | — |
+| 2026-05-25 深夜 (六) | 第七轮 review 4 项：FilterPipeline 拆 transient vs classification（财报永久 reject 漏洞）/ Filter 后补 postUnreadCount / 检测可用性按钮不动 globalAIError / BuiltInFeeds 插入扫全表去重；测试 219 → 222 | `456aeeb` |
+| 2026-05-25 深夜 (七) | 第八轮 review 4 项：ArticleSnapshot 按 publishedAt 倒序排序 / 删源后清 per-cat digest+recommend 缓存 / saveAndCheck 失败不污染 globalAIError / parseRecommendResponse 改正则提取（支持 "1. 2. 3." 等格式）；测试 222 → 227 + 踩坑 #39 | — |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -135,6 +136,10 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | Filter 持久化后补 postUnreadCount（第七轮 P2）| runFilterStage `persistSucceeded && !writeIds.isEmpty` 时调 `postUnreadCount(context:)` | 财报文章 accepted=nil 时不计入 badge；filter 通过后 accepted=true，badge 应该立即更新；menu bar label 只听通知不补就 stale 到下次 refresh / 菜单打开 |
 | 检测可用性按钮不动 globalAIError（第七轮 P3）| `checkConnection()` 完全删 set/clear globalAIError；只更新本页 checkStatus；`saveAndCheck` 仍维持成功 set/失败 set globalAIError（持久化路径） | 检测候选 ≠ 主流程持久化值；旧实现成功清/失败设 globalAIError 让候选好 key 误清主 UI 错误，或候选坏 key 误显示全局错误 |
 | BuiltInFeeds 插入扫全表去重（第七轮 P3）| 新增源插入前从 `context.fetch(FetchDescriptor<Feed>())` 扫全表（含 custom）比对 URL；删除/元数据同步仍只动 built-in | 旧实现只扫 built-in，如果某 URL 被加入 built-in 时用户已有同 URL custom 源，会插入重复 feed；重复 fetch + 重复显示 + 失败统计噪声 |
+| ArticleSnapshot 内存 sort by publishedAt（第八轮 P2）| `captureOrThrow` fetch 后 `articles.sorted { $0.publishedAt > $1.publishedAt }`；不用 `FetchDescriptor.sortBy` 避开 SwiftData 边界 SIGTRAP | 旧实现不带 sort 让 prompt prefix(50) / prefix(20) 切到的不一定是最新文章；AI 推荐/日报内容依赖 SwiftData 默认返回顺序 + RSS 并发完成顺序 |
+| 删源后清 per-cat digest+recommend 缓存（第八轮 P2）| RefreshService 新增 `invalidatePerCatCache(for:)` 公开方法；FeedRowView.handleToggle / FeedsSettingsView.deleteCustomFeeds 成功路径调用 | 旧路径删源后只更 badge；digest 文本可能含已删源标题；recommendedArticleIDs 非空让 auto refresh 不重生（陈旧永留） |
+| saveAndCheck 失败不污染 globalAIError（第八轮 P3）| `saveAndCheck` 失败 catch 删 `globalAIError = ...` 这一行；只更新本页 checkStatus | 持久化失败时 prefs 未变，主 UI 反映的应该是"当前持久化配置"，不该被未保存候选输入污染 |
+| parseRecommendResponse 改正则提取（第八轮 P3）| 旧 `components(separatedBy:)` 改 `NSRegularExpression("\d+")` 匹配所有数字串；空 prompt cap 用 `count > 0 && totalCount > 0` guard | 旧实现遇 "1. 2. 3."/"[1] [2]"/"推荐：1,3,7" 等模型啰嗦输出会 split 后整数解析失败返空；正则提取数字鲁棒得多 |
 
 ---
 
@@ -326,3 +331,6 @@ v2: 27 个 = 11 AI + 8 财报 + 8 新闻。完整列表见 `Sources/AINewsBar/Se
 
 ### 38. Atom 解析 `entry.links?.first` 可能拿到 rel=self 非文章 URL
 **根因**：Atom 规范允许 `<link rel="self">` 指向 feed 自身、`<link rel="alternate">` 才是文章 HTML 链接。FeedKit 返回顺序无保证，`first` 可能拿到 rel=self URL → UI 打开文章却跳到 RSS 源本身。**修复**：`preferredAtomLink` 静态方法优先选 `rel=alternate + type=text/html`，再 fallback `rel=alternate`，最后 fallback first（兼容缺 rel 的源）。心得：标准里有多个等价语义的字段时，规范的优先级永远不能依赖第三方库的迭代顺序。
+
+### 39. SwiftData ModelContainer 在测试中被 `let (_, context) = TestContainer.make()` 立即 ARC 释放 → context.insert SIGTRAP
+**根因**：`(_, context)` 让 container 在表达式结束后立即被 ARC 释放；mainContext 底层 store 是 container 拥有的，container 释放后 context 调用任何方法（insert/save/fetch）触发 trap，xctest 报 "exited with unexpected signal code 5"，没有 stack trace 也没有断言失败信息。**修复**：`let (container, context) = TestContainer.make(); _ = container`（或挪到 setUp 让 storedProperty 保留）。心得：SwiftData ModelContext 的有效寿命强依赖 ModelContainer 的 strong reference，不像 Core Data 有显式 persistentStoreCoordinator weak/strong 选择。命名绑定别用 `_` 丢掉 container。

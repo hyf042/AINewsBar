@@ -228,6 +228,30 @@ final class RefreshService: ObservableObject {
         await refreshAllCatsSequentially()
     }
 
+    /// 第八轮 P2 review：禁用内置源 / 删除自定义源后调用 —— 该 cat 的现存推荐/日报
+    /// 可能引用已删除文章或包含已删除源的内容。本方法清掉该 cat 的派生缓存：
+    /// - dailyDigest（文本可能含已删源标题/摘要 → 必清）
+    /// - recommendedArticleIDs（引用可能失效；且非空让 RefreshDecision.shouldRegenerate
+    ///   误判为"已有结果可保留"，下次 auto refresh 不重生 → 旧结果永远不清）
+    /// - digestArticleCount / recommendArticleCount（让 delta 重新判断从 0 起算）
+    /// - prefs 同步清
+    ///
+    /// **不清** lastRefreshDate / 错误状态：caller 决定要不要紧接着 refresh（启用
+    /// 源场景需要立即跑；禁用源场景用户可能只想收掉源不想再 burn token）。
+    func invalidatePerCatCache(for cat: AINewsBar.Category) {
+        mutate(cat) {
+            $0.dailyDigest = nil
+            $0.recommendedArticleIDs = []
+            $0.lastDigestDate = nil
+            $0.lastRecommendDate = nil
+            $0.digestArticleCount = 0
+            $0.recommendArticleCount = 0
+        }
+        prefs.clearDigest(for: cat)
+        prefs.clearRecommendState(for: cat)
+        Log.write("[Refresh][\(cat.rawValue)] invalidated per-cat cache after feed source change")
+    }
+
     /// 用户更新 credential（API Key / 模型）并测试成功后调用。
     ///
     /// **onboarding 断点修复**（P2 第五轮 review）：

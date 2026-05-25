@@ -178,9 +178,12 @@ struct BuiltInFeedRowView: View {
             // menu bar badge —— 主列表 @Query 会自动更新，但 badge 只靠
             // Notification (AppDelegate 监听)。不主动 post 就 stale。
             refreshService.postUnreadCount(context: modelContext)
+            // 第八轮 P2：清该 cat 推荐/日报派生缓存。digest 文本可能含已删源内容；
+            // 推荐 IDs 可能指向已删文章；且非空会让 auto refresh 不重生（陈旧永留）
+            let cat = AINewsBar.Category.from(rawValue: feed.category)
+            refreshService.invalidatePerCatCache(for: cat)
             if enabled {
                 let service = refreshService
-                let cat = AINewsBar.Category.from(rawValue: feed.category)
                 Task { await service.refresh(cat) }
             }
         } catch {

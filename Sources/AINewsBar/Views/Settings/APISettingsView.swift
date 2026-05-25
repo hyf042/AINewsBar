@@ -116,30 +116,29 @@ struct APISettingsView: View {
         }
     }
 
-    /// P2 第六轮 review：**先验证候选值，成功后才持久化**。
+    /// 第六轮 P2 + 第八轮 P3：**先验证候选值，成功后才持久化**；失败完全不动主 UI 状态。
+    ///
     /// 旧路径先 saveAPIKey/saveModel 再 testConnection —— 用户手滑输错就把上一套
-    /// 可用配置覆盖了，主流程从下次 refresh 起也用坏配置。
-    /// 新路径：失败时 prefs 完全不动，主 UI 仍用旧 key（可能可用）继续工作。
+    /// 可用配置覆盖了。第六轮改为"验后保存"，但失败仍设 globalAIError 污染主 UI。
+    /// 第八轮：失败时 prefs 未变，主 UI 反映的是"当前持久化配置"的状态，不该被
+    /// 一个未保存的候选输入污染。失败只更新本页 checkStatus，与 checkConnection 对齐。
     @MainActor
     private func saveAndCheck() async {
         guard !apiKey.isEmpty, !effectiveModel.isEmpty else { return }
         checkStatus = .checking
         do {
             try await BailianService.shared.testConnection(apiKey: apiKey, model: effectiveModel)
-            // 验证通过 → 持久化
+            // 验证通过 → 持久化 + 触发主流程
             PreferencesService.shared.saveAPIKey(apiKey)
             PreferencesService.shared.saveModel(effectiveModel)
             checkStatus = .success(1)
-            // 触发 onboarding 路径：清 credential 错误 + 顺序刷新三 cat
+            // onboarding 路径：清 credential 错误 + 顺序刷新三 cat
             let service = refreshService
             Task { await service.applyCredentialChange() }
         } catch {
-            // 验证失败 → 不动 prefs（保留上一套可用配置）
+            // 验证失败 → 不动 prefs，也不动 globalAIError
+            // 候选值与主流程持久化值是两份数据，状态隔离
             checkStatus = .failure(error.localizedDescription)
-            // 主动 set globalAIError 让主 UI 看到"当前输入这组 credential 不可用"；
-            // 若旧 key 可用，下次 refresh 的 clearGlobalAIErrorAfterAISuccess 会清掉
-            refreshService.globalAIError = GlobalAIError.from(error)
-                ?? .other(error.localizedDescription)
         }
     }
 

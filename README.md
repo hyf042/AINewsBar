@@ -274,6 +274,19 @@ review 后又补一轮 6 项设置持久化与外部边界硬化：
 
 测试 +3 (219 → 222)：`testUnknownErrorMarkedAsTransient` (rename) + `testMalformedResponseMarkedAsClassificationFailed` + `testHTTP401MarkedAsTransientWithGlobalError` + `testHTTP429MarkedAsTransient`（净 +3）。
 
+### 第八轮 review（4 项 P2/P3 + 1 个测试踩坑）
+
+| 等级 | 项 | 修复 |
+|---|---|---|
+| 🟠 P2 | ArticleSnapshot 不排序 → AI 输入随机切掉最新文章 | `captureOrThrow` fetch 后 in-memory `sorted { $0.publishedAt > $1.publishedAt }`；不用 SwiftData `SortDescriptor` 避开边界脆性 |
+| 🟠 P2 | 删源后未清推荐/日报派生缓存 | RefreshService 新增 `invalidatePerCatCache(for:)`；FeedRow toggle / 删除自定义源成功路径调用；清 digest 文本/recommendedArticleIDs/counts/prefs |
+| 🟡 P3 | saveAndCheck 失败仍写 globalAIError | 失败 catch 删 `globalAIError = ...`；持久化未变时主 UI 应仅反映"当前持久化配置"，候选输入不应污染主 UI |
+| 🟡 P3 | parseRecommendResponse 不支持 "1. 2. 3." | 改 NSRegularExpression `\d+` 提取，鲁棒兼容 "1. 2. 3."/"[1][2]"/"推荐：1,3"等模型啰嗦格式 |
+
+测试 +5 (222 → 227)：`testCaptureOrThrowSortsByPublishedAtDescending` + 4 个 parser 格式测试（dotted/bracketed/prefixed/multi-digit）；`testParseFiltersNegative` 改名为 `testParseTreatsNegativeAsPositive` 反映正则行为。
+
+**新增踩坑 #39**：SwiftData ModelContainer 被 `let (_, context) = ...` 立即 ARC 释放 → context.insert SIGTRAP（signal code 5）无 stack trace。修复用命名绑定 `let (container, _) = ...; _ = container`。
+
 ## 设计文档
 
 - `CLAUDE.md` — 完整工作记录与设计决策表（含 38 条踩坑记录）

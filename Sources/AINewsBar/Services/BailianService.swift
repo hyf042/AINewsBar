@@ -194,26 +194,35 @@ actor BailianService: AISummarizing {
 
     // MARK: - 序号解析（纯函数，可单测）
 
-    /// 支持的分隔符：英文逗号 / 中文逗号 / 顿号 / 空格 / 换行 / Tab
-    static let indexSeparators = CharacterSet(charactersIn: ",，、 \n\t")
-
     /// 解析模型返回的序号串。返回 1-based 序号数组，保序去重，越界过滤，最多 `count` 个。
     /// 模型按推荐度由高到低返回，因此保序即推荐度排序。
     /// `count` 由 caller (recommendArticles) 从 CategoryConfig 注入；旧测试默认 5 保持兼容。
+    ///
+    /// **正则提取**（第八轮 P3 review）：旧实现按 `,，、 \n\t` 分隔后整数解析，
+    /// 模型啰嗦时返回 "1. 2. 3." / "[1] [2]" / "1) 2) 3)" / "推荐：1,3,7" 都会
+    /// 解析为空集合。改为提取所有 `\d+` 串再过滤范围，对 prompt 输出格式更鲁棒。
     static func parseRecommendResponse(_ response: String, totalCount: Int, count: Int = 5) -> [Int] {
-        let parts = response.components(separatedBy: indexSeparators)
+        guard count > 0, totalCount > 0 else { return [] }
+        let nsResponse = response as NSString
+        let range = NSRange(location: 0, length: nsResponse.length)
+        let matches = Self.digitsRegex.matches(in: response, range: range)
         var seen = Set<Int>()
         var result: [Int] = []
-        for part in parts {
-            guard let n = Int(part.trimmingCharacters(in: .whitespaces)),
-                  n >= 1, n <= totalCount,
-                  !seen.contains(n) else { continue }
+        for match in matches {
+            let token = nsResponse.substring(with: match.range)
+            guard let n = Int(token), n >= 1, n <= totalCount, !seen.contains(n) else { continue }
             seen.insert(n)
             result.append(n)
             if result.count == count { break }
         }
         return result
     }
+
+    /// `\d+` 模式 — 编译永远成功（force unwrap 安全），lazy static 避免每次调用重建
+    private static let digitsRegex: NSRegularExpression = {
+        // swiftlint:disable:next force_try
+        try! NSRegularExpression(pattern: #"\d+"#)
+    }()
 
     /// Filter 响应解析：首字符匹配 "是" / "否"。
     /// 容错："是的，..." / "否，因为..." / 前缀空白都正确解析。

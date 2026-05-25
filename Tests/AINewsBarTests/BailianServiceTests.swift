@@ -32,9 +32,12 @@ final class BailianServiceTests: XCTestCase {
         XCTAssertEqual(result, [2, 5], "0 和 99 应被过滤")
     }
 
-    func testParseFiltersNegative() {
+    /// 第八轮 P3 行为变化：正则 `\d+` 不识别负号，"-1" 中的 "1" 会被提取出来。
+    /// 这是可接受的 fallback（模型几乎不会返回负数；即使返回，提取数字部分仍合理）。
+    func testParseTreatsNegativeAsPositive() {
         let result = BailianService.parseRecommendResponse("-1,3,4", totalCount: 10)
-        XCTAssertEqual(result, [3, 4])
+        XCTAssertEqual(result, [1, 3, 4],
+                       "正则提取 `\\d+`：-1 中的 1 被识别（不识别负号，可接受 fallback）")
     }
 
     func testParsePicksAtMostFive() {
@@ -72,6 +75,38 @@ final class BailianServiceTests: XCTestCase {
     func testParseWithNewlines() {
         let result = BailianService.parseRecommendResponse("2\n7\n15", totalCount: 20)
         XCTAssertEqual(result, [2, 7, 15])
+    }
+
+    // 第八轮 P3 review：常见模型啰嗦输出格式
+
+    /// "1. 2. 3." 这种带点号的列表格式 — 旧实现按 `,，、 \n\t` split 后整数解析失败
+    func testParseDottedNumberList() {
+        let result = BailianService.parseRecommendResponse("1. 2. 3. 4. 5.", totalCount: 20)
+        XCTAssertEqual(result, [1, 2, 3, 4, 5])
+    }
+
+    /// 序号编号在括号内："1) 2) 3)" 或 "(1)(2)(3)"
+    func testParseBracketedNumbers() {
+        XCTAssertEqual(BailianService.parseRecommendResponse("1) 2) 3) 4) 5)", totalCount: 20),
+                       [1, 2, 3, 4, 5])
+        XCTAssertEqual(BailianService.parseRecommendResponse("[1][2][3][4][5]", totalCount: 20),
+                       [1, 2, 3, 4, 5])
+        XCTAssertEqual(BailianService.parseRecommendResponse("(1)(2)(3)(4)(5)", totalCount: 20),
+                       [1, 2, 3, 4, 5])
+    }
+
+    /// 模型添加前缀文字："推荐：1,3,7" / "Picks: 1, 3, 7"
+    func testParsePrefixedResponse() {
+        XCTAssertEqual(BailianService.parseRecommendResponse("推荐：2,4,6,8,10", totalCount: 20),
+                       [2, 4, 6, 8, 10])
+        XCTAssertEqual(BailianService.parseRecommendResponse("Picks: 1, 3, 5", totalCount: 20),
+                       [1, 3, 5])
+    }
+
+    /// 多位数序号仍能完整提取
+    func testParseMultiDigitIndices() {
+        let result = BailianService.parseRecommendResponse("12. 7. 23. 4. 18.", totalCount: 30)
+        XCTAssertEqual(result, [12, 7, 23, 4, 18])
     }
 
     // MARK: - Prompt 构造

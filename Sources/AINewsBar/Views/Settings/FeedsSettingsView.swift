@@ -124,6 +124,12 @@ struct FeedsSettingsView: View {
             // 删除自定义源同时删该源所有文章（在 FeedSettingsStore 内）。badge 必须同步
             // —— 主列表靠 @Query 自动更新，但 menu bar badge 只靠 Notification。
             refreshService.postUnreadCount(context: modelContext)
+            // 第八轮 P2：清涉及到的 cat 推荐/日报派生缓存（同 FeedRowView 处理）。
+            // 删除可能跨多个 cat（虽然 UI 当前限当前 picker cat，仍按入参 feed 各自 cat 清）
+            let affectedCats = Set(feeds.map { AINewsBar.Category.from(rawValue: $0.category) })
+            for cat in affectedCats {
+                refreshService.invalidatePerCatCache(for: cat)
+            }
         } catch {
             modelContext.rollback()
             deleteErrorMessage = error.localizedDescription

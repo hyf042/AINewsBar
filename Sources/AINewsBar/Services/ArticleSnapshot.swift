@@ -19,9 +19,25 @@ struct ArticleSnapshot: Sendable {
 
     var summarizedCount: Int { summarized.count }
 
+    /// 全表快照（旧 API，等价 capture(from:category:nil)，仅 .ai cat 时建议显式传 .ai）
     @MainActor
     static func capture(from context: ModelContext) -> ArticleSnapshot {
         let articles = context.safeFetch(FetchDescriptor<Article>())
+        return ArticleSnapshot(all: articles.map {
+            Item(id: $0.id, title: $0.title, summary: $0.aiSummary)
+        })
+    }
+
+    /// v2: 单 cat 快照。仅 fetch 该 cat 且 accepted==true 的文章（filter rejected 的不进 snapshot
+    /// 避免污染 Recommend/Digest 输入）。
+    @MainActor
+    static func capture(from context: ModelContext, category: AINewsBar.Category) -> ArticleSnapshot {
+        let catRaw = category.rawValue
+        let articles = context.safeFetch(
+            FetchDescriptor<Article>(predicate: #Predicate {
+                $0.category == catRaw && $0.accepted == true
+            })
+        )
         return ArticleSnapshot(all: articles.map {
             Item(id: $0.id, title: $0.title, summary: $0.aiSummary)
         })

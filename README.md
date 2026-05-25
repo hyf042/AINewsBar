@@ -168,13 +168,13 @@ swift test
 ### AI tab（11）
 OpenAI News · Google DeepMind · Hugging Face Blog · TechCrunch AI · The Verge AI · Ars Technica AI · The Decoder · MIT Technology Review · VentureBeat AI · TLDR AI · 量子位
 
-### 财报 tab（8，6 en + 2 zh）
-Seeking Alpha · Apple Newsroom · CNBC Top News · Bloomberg Markets · Yahoo Finance · MarketWatch · FT 中文财经 · 雪球热门
+### 财报 tab（8，4 en + 4 zh）
+Seeking Alpha · Apple Newsroom · CNBC Top News · Yahoo Finance · 财联社 头条 · 华尔街见闻 全球 · FT 中文财经 · 雪球热门
 
 ### 新闻 tab（8，4 en + 4 zh）
 BBC News · NYT World · Hacker News Top · The Verge · 36 氪 · 新华网 · 人民日报 · FT 中文新闻
 
-> **中文财报 RSS 稀缺**为已知 limitation：华尔街见闻 / 第一财经 / 东方财富 / 财新 等官方 RSS 全部 404 或返 HTML（v2 重构时 curl 验证过）；新浪财经返自定义 XML 非标准 RSS。仅 FT 中文 + 雪球 2 个标准 RSS 可用，故财报 tab 妥协为 6 en + 2 zh。用户可自加自定义中文源补足（如自部署 RSSHub 实例）。
+> **中文财报 RSS 镜像依赖**：华尔街见闻 / 第一财经 / 东方财富 / 财新 等官方 RSS 全部 404 或返 HTML（v2 时 curl 验证过）。2026-05-25 通过公共 RSSHub 镜像 `rsshub.rssforever.com` 引入 **财联社 头条** + **华尔街见闻 全球** 两个高质量中文财经源（条目数 ≥30、含完整摘要），换出英文里重叠度最高的 Bloomberg Markets + MarketWatch。备用镜像 `rss.injahow.cn` 同路径可用，公共 RSSHub 实例随时可能被反爬升级或下线 — known risk。用户可在设置里手动改 URL（如自部署 RSSHub 实例彻底自主）。
 
 ## 设计文档
 

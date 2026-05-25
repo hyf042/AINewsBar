@@ -275,7 +275,9 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 
 **AI (11)**：OpenAI News, Google DeepMind, Hugging Face Blog, TechCrunch AI, The Verge AI, Ars Technica AI, The Decoder, MIT Tech Review, VentureBeat AI, TLDR AI, 量子位
 
-**财报 (8, 6 en + 2 zh)**：Seeking Alpha, Apple Newsroom, CNBC Top News, Bloomberg Markets, Yahoo Finance, MarketWatch, FT 中文财经, 雪球热门
+**财报 (8, 4 en + 4 zh)**：Seeking Alpha, Apple Newsroom, CNBC Top News, Yahoo Finance, 财联社 头条, 华尔街见闻 全球, FT 中文财经, 雪球热门
+
+> **中文财报源镜像依赖**（2026-05-25 替换 Bloomberg Markets + MarketWatch → 财联社 头条 + 华尔街见闻 全球）：官方域名直连全部 404 或返 HTML，走 RSSHub 公共镜像 `rsshub.rssforever.com`。备用镜像 `rss.injahow.cn` 同路径可用，user 可在设置里手动改 URL（写死 rssforever 不引入自动 fallback 复杂度）。RSSHub 公共实例随时可能被反爬升级或下线 — known risk，可接受。
 
 **新闻 (8, 4 en + 4 zh)**：BBC News, NYT World, Hacker News Top, The Verge, 36 氪, 新华网, 人民日报, FT 中文新闻
 

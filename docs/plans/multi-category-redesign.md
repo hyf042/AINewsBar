@@ -253,11 +253,13 @@ static let container: ModelContainer = {
 | 1 | Seeking Alpha | https://seekingalpha.com/feed.xml | en |
 | 2 | Apple Newsroom | https://www.apple.com/newsroom/rss-feed.rss | en |
 | 3 | CNBC Top News | https://www.cnbc.com/id/100727362/device/rss/rss.html | en |
-| 4 | Bloomberg Markets | https://feeds.bloomberg.com/markets/news.rss | en |
-| 5 | Yahoo Finance | https://finance.yahoo.com/news/rssindex | en |
-| 6 | MarketWatch | https://feeds.marketwatch.com/marketwatch/topstories/ | en |
+| 4 | Yahoo Finance | https://finance.yahoo.com/news/rssindex | en |
+| 5 | 财联社 头条 | https://rsshub.rssforever.com/cls/depth/1000 | zh |
+| 6 | 华尔街见闻 全球 | https://rsshub.rssforever.com/wallstreetcn/news/global | zh |
 | 7 | FT Chinese Finance | https://www.ftchinese.com/rss/feed | zh |
 | 8 | 雪球热门 | https://xueqiu.com/hots/topic/rss | zh |
+
+> 2026-05-25 更新：原 Bloomberg Markets 与 MarketWatch 因与 CNBC / Yahoo 内容重叠度过高被换出，引入两个中文财经源（条目数 30+ / 含完整摘要）。两个中文源走 RSSHub 公共镜像 `rsshub.rssforever.com`，备用镜像 `rss.injahow.cn`。
 
 ### 3.3 新闻 tab（8 - 4 en + 4 zh）
 

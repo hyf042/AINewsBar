@@ -3,7 +3,9 @@ import SwiftData
 
 enum BuiltInFeeds {
     /// 内置源完整清单。v2-multi-category 扩展为 27 源（11 AI + 8 财报 + 8 新闻）。
-    /// URL 已 curl 验证（2026-05-24）；中文财报源稀缺为 known limitation（见 spec §6）。
+    /// URL 已 curl 验证（2026-05-24 / 2026-05-25 财报源增补中文）。
+    /// 财报区中文源依赖 RSSHub 公共镜像 rsshub.rssforever.com（官方直连全 404/HTML）；
+    /// 备用镜像 rss.injahow.cn 同路径可用，user 可在设置里手动替换 URL。
     static let all: [(category: Category, title: String, url: String)] = [
 
         // MARK: - AI tab (11)
@@ -19,13 +21,13 @@ enum BuiltInFeeds {
         (.ai, "TLDR AI",               "https://tldr.tech/api/rss/ai"),
         (.ai, "量子位",                  "https://www.qbitai.com/feed"),
 
-        // MARK: - 财报 tab (8 = 6 en + 2 zh)
+        // MARK: - 财报 tab (8 = 4 en + 4 zh)
         (.earnings, "Seeking Alpha",      "https://seekingalpha.com/feed.xml"),
         (.earnings, "Apple Newsroom",     "https://www.apple.com/newsroom/rss-feed.rss"),
         (.earnings, "CNBC Top News",      "https://www.cnbc.com/id/100727362/device/rss/rss.html"),
-        (.earnings, "Bloomberg Markets",  "https://feeds.bloomberg.com/markets/news.rss"),
         (.earnings, "Yahoo Finance",      "https://finance.yahoo.com/news/rssindex"),
-        (.earnings, "MarketWatch",        "https://feeds.marketwatch.com/marketwatch/topstories/"),
+        (.earnings, "财联社 头条",          "https://rsshub.rssforever.com/cls/depth/1000"),
+        (.earnings, "华尔街见闻 全球",       "https://rsshub.rssforever.com/wallstreetcn/news/global"),
         (.earnings, "FT 中文财经",          "https://www.ftchinese.com/rss/feed"),
         (.earnings, "雪球热门",             "https://xueqiu.com/hots/topic/rss"),
 

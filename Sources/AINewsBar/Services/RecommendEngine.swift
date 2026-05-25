@@ -13,10 +13,9 @@ struct RecommendEngine {
     let ai: any AISummarizing
 
     /// 返回 nil = 候选不足（数据完整性保护）；throws = AI 调用失败
-    /// v2-multi-category: category 参数选 cat-specific prompt（默认 .ai 兼容 Phase 4 前调用方）
     func run(
         snapshot: ArticleSnapshot,
-        category: AINewsBar.Category = .ai,
+        category: AINewsBar.Category,
         apiKey: String,
         model: String
     ) async throws -> Outcome? {

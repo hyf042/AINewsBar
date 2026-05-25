@@ -64,13 +64,13 @@ final class PreferencesServiceTests: XCTestCase {
     // MARK: - Digest
 
     func testLoadDigestDefaultNil() {
-        XCTAssertNil(prefs.loadDigest())
+        XCTAssertNil(prefs.loadDigest(for: .ai))
     }
 
     func testSaveAndLoadDigest() throws {
         let date = Date()
-        prefs.saveDigest(content: "今日要闻", date: date)
-        let loaded = try XCTUnwrap(prefs.loadDigest())
+        prefs.saveDigest(content: "今日要闻", date: date, for: .ai)
+        let loaded = try XCTUnwrap(prefs.loadDigest(for: .ai))
         XCTAssertEqual(loaded.content, "今日要闻")
         XCTAssertEqual(loaded.date.timeIntervalSince1970,
                        date.timeIntervalSince1970, accuracy: 0.001)
@@ -78,48 +78,48 @@ final class PreferencesServiceTests: XCTestCase {
 
     // P3: clearDigest 仅清日报相关 key，保留推荐计数
     func testClearDigestRemovesOnlyDigestKeys() {
-        prefs.saveDigest(content: "x", date: Date())
-        prefs.saveDigestArticleCount(5)
-        prefs.saveRecommendArticleCount(7)
-        prefs.clearDigest()
+        prefs.saveDigest(content: "x", date: Date(), for: .ai)
+        prefs.saveDigestArticleCount(5, for: .ai)
+        prefs.saveRecommendArticleCount(7, for: .ai)
+        prefs.clearDigest(for: .ai)
 
-        XCTAssertNil(prefs.loadDigest())
-        XCTAssertEqual(prefs.loadDigestArticleCount(), 0)
-        XCTAssertEqual(prefs.loadRecommendArticleCount(), 7, "clearDigest 不应触及推荐计数")
+        XCTAssertNil(prefs.loadDigest(for: .ai))
+        XCTAssertEqual(prefs.loadDigestArticleCount(for: .ai), 0)
+        XCTAssertEqual(prefs.loadRecommendArticleCount(for: .ai), 7, "clearDigest 不应触及推荐计数")
     }
 
     func testClearRecommendStateRemovesOnlyRecommendKeys() {
-        prefs.saveDigest(content: "x", date: Date())
-        prefs.saveDigestArticleCount(5)
-        prefs.saveRecommendArticleCount(7)
-        prefs.clearRecommendState()
+        prefs.saveDigest(content: "x", date: Date(), for: .ai)
+        prefs.saveDigestArticleCount(5, for: .ai)
+        prefs.saveRecommendArticleCount(7, for: .ai)
+        prefs.clearRecommendState(for: .ai)
 
-        XCTAssertNotNil(prefs.loadDigest(), "clearRecommendState 不应触及日报内容")
-        XCTAssertEqual(prefs.loadDigestArticleCount(), 5)
-        XCTAssertEqual(prefs.loadRecommendArticleCount(), 0)
+        XCTAssertNotNil(prefs.loadDigest(for: .ai), "clearRecommendState 不应触及日报内容")
+        XCTAssertEqual(prefs.loadDigestArticleCount(for: .ai), 5)
+        XCTAssertEqual(prefs.loadRecommendArticleCount(for: .ai), 0)
     }
 
     // MARK: - Article counts
 
     func testArticleCountDefaultZero() {
-        XCTAssertEqual(prefs.loadDigestArticleCount(), 0)
-        XCTAssertEqual(prefs.loadRecommendArticleCount(), 0)
+        XCTAssertEqual(prefs.loadDigestArticleCount(for: .ai), 0)
+        XCTAssertEqual(prefs.loadRecommendArticleCount(for: .ai), 0)
     }
 
     func testDigestArticleCount() {
-        prefs.saveDigestArticleCount(42)
-        XCTAssertEqual(prefs.loadDigestArticleCount(), 42)
+        prefs.saveDigestArticleCount(42, for: .ai)
+        XCTAssertEqual(prefs.loadDigestArticleCount(for: .ai), 42)
     }
 
     func testRecommendArticleCount() {
-        prefs.saveRecommendArticleCount(7)
-        XCTAssertEqual(prefs.loadRecommendArticleCount(), 7)
+        prefs.saveRecommendArticleCount(7, for: .ai)
+        XCTAssertEqual(prefs.loadRecommendArticleCount(for: .ai), 7)
     }
 
     func testCountsAreIndependent() {
-        prefs.saveDigestArticleCount(10)
-        prefs.saveRecommendArticleCount(20)
-        XCTAssertEqual(prefs.loadDigestArticleCount(), 10)
-        XCTAssertEqual(prefs.loadRecommendArticleCount(), 20)
+        prefs.saveDigestArticleCount(10, for: .ai)
+        prefs.saveRecommendArticleCount(20, for: .ai)
+        XCTAssertEqual(prefs.loadDigestArticleCount(for: .ai), 10)
+        XCTAssertEqual(prefs.loadRecommendArticleCount(for: .ai), 20)
     }
 }

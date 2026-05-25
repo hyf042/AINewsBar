@@ -2,7 +2,7 @@ import XCTest
 import SwiftData
 @testable import AINewsBar
 
-/// v2-multi-category: 验证 per-cat 状态隔离 + backward-compat + force/timer cat 化。
+/// v2-multi-category: 验证 per-cat 状态隔离 + .ai shortcut + force/timer cat 化。
 @MainActor
 final class RefreshServicePerCategoryTests: XCTestCase {
 

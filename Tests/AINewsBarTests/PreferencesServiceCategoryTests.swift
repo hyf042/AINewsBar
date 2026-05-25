@@ -98,20 +98,5 @@ final class PreferencesServiceCategoryTests: XCTestCase {
         XCTAssertEqual(prefs2.loadSettingsFeedsTab(), .news)
     }
 
-    // MARK: - 旧签名 backward-compat (走 protocol extension → .ai)
-
-    func testOldDigestSignatureForwardsToAI() {
-        prefs.saveDigest(content: "通过旧签名写", date: Date(timeIntervalSince1970: 3000))
-
-        // 旧签名读：应能读到自己写的
-        let oldRead = prefs.loadDigest()
-        XCTAssertEqual(oldRead?.content, "通过旧签名写")
-
-        // 新签名读 .ai：应等价
-        let newRead = prefs.loadDigest(for: .ai)
-        XCTAssertEqual(newRead?.content, "通过旧签名写")
-
-        // 新签名读 .earnings：应 nil（旧签名不会跨 cat 污染）
-        XCTAssertNil(prefs.loadDigest(for: .earnings))
-    }
+    // 旧无 category 签名已删除：调用方必须显式传入 cat，避免后续新增分类时误写 .ai。
 }

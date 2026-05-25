@@ -338,9 +338,9 @@ final class RefreshServiceTests: XCTestCase {
         service.recommendedArticleIDs = [UUID(), UUID()]
         service.lastDigestDate = yesterday
         service.lastRecommendDate = yesterday
-        prefs.saveDigest(content: "昨天的摘要", date: yesterday)
-        prefs.saveDigestArticleCount(5)
-        prefs.saveRecommendArticleCount(5)
+        prefs.saveDigest(content: "昨天的摘要", date: yesterday, for: .ai)
+        prefs.saveDigestArticleCount(5, for: .ai)
+        prefs.saveRecommendArticleCount(5, for: .ai)
 
         service.resetCrossedDayStateIfNeeded()
 
@@ -357,9 +357,9 @@ final class RefreshServiceTests: XCTestCase {
         service.recommendedArticleIDs = [UUID()]
         service.lastDigestDate = Date()
         service.lastRecommendDate = Date()
-        prefs.saveDigest(content: "今天的摘要", date: Date())
-        prefs.saveDigestArticleCount(5)
-        prefs.saveRecommendArticleCount(5)
+        prefs.saveDigest(content: "今天的摘要", date: Date(), for: .ai)
+        prefs.saveDigestArticleCount(5, for: .ai)
+        prefs.saveRecommendArticleCount(5, for: .ai)
 
         XCTAssertNil(service.lastResetCheckDate, "模拟同日重启：内存 reset guard 尚未设置")
         service.resetCrossedDayStateIfNeeded()
@@ -412,7 +412,7 @@ final class RefreshServiceTests: XCTestCase {
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
         service.lastRefreshDate = yesterday
         service.dailyDigest = "昨天的摘要"
-        prefs.saveDigest(content: "昨天的摘要", date: yesterday)
+        prefs.saveDigest(content: "昨天的摘要", date: yesterday, for: .ai)
 
         await service.refreshIfNeeded()
 

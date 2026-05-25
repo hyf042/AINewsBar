@@ -123,8 +123,8 @@ final class MockAI: AISummarizing, @unchecked Sendable {
     }
 }
 
-/// v2-multi-category: per-cat 字典存储。旧测试 fixture 通过 backward-compat
-/// helper 直接读 `prefs.digestContent` 等访问 .ai cat 状态（保持兼容）。
+/// v2-multi-category: per-cat 字典存储。部分测试通过 helper 直接读
+/// `prefs.digestContent` 等访问 .ai cat 状态。
 final class InMemoryPrefs: PreferencesStoring {
     var apiKey: String? = "mock-api-key"
     var model: String = "mock-model"
@@ -138,7 +138,7 @@ final class InMemoryPrefs: PreferencesStoring {
     private var _selectedTab: AINewsBar.Category = .ai
     private var _settingsFeedsTab: AINewsBar.Category = .ai
 
-    // MARK: - Backward-compat helpers（.ai 快捷访问，旧测试 fixture 用）
+    // MARK: - Test helpers（.ai 快捷访问）
 
     var digestContent: String? {
         get { digestContents[.ai] }
@@ -176,7 +176,7 @@ final class InMemoryPrefs: PreferencesStoring {
         autoRefreshEnabled[cat] = enabled
     }
 
-    // MARK: - per-cat 新签名（旧签名由 protocol extension 自动 delegate 到 .ai）
+    // MARK: - per-cat state
 
     func loadDigest(for cat: AINewsBar.Category) -> (content: String, date: Date)? {
         guard let c = digestContents[cat], let d = digestDates[cat] else { return nil }
@@ -211,7 +211,7 @@ final class InMemoryUsageRecorder: UsageRecording {
         let success: Bool
         let category: AINewsBar.Category
 
-        /// 兼容旧测试 case（Phase 4 前 cat 默认 .ai）
+        /// 测试断言 helper：未关心 category 的 case 默认按 .ai 构造期望值
         init(scene: UsageScene, model: String, input: Int, output: Int,
              success: Bool, category: AINewsBar.Category = .ai) {
             self.scene = scene

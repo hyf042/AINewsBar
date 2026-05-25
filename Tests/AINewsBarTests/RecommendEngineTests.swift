@@ -31,6 +31,7 @@ final class RecommendEngineTests: XCTestCase {
 
     func testRunsWhenEnoughArticles() async throws {
         let outcome = try await engine.run(snapshot: snap(count: 5),
+                                            category: .ai,
                                             apiKey: "k", model: "m")
         XCTAssertNotNil(outcome)
         XCTAssertEqual(ai.recommendCallCount, 1)
@@ -39,6 +40,7 @@ final class RecommendEngineTests: XCTestCase {
     func testReturnsNilBelow5Articles() async throws {
         // 推荐展示数从 3 升 5，候选阈值同步提升
         let outcome = try await engine.run(snapshot: snap(count: 4),
+                                            category: .ai,
                                             apiKey: "k", model: "m")
         XCTAssertNil(outcome, "<5 篇文章不应调 AI")
         XCTAssertEqual(ai.recommendCallCount, 0)
@@ -48,6 +50,7 @@ final class RecommendEngineTests: XCTestCase {
         ai.recommendError = URLError(.timedOut)
         do {
             _ = try await engine.run(snapshot: snap(count: 5),
+                                      category: .ai,
                                       apiKey: "k", model: "m")
             XCTFail("应抛出错误")
         } catch {
@@ -60,6 +63,7 @@ final class RecommendEngineTests: XCTestCase {
 
         do {
             _ = try await engine.run(snapshot: snap(count: 5),
+                                      category: .ai,
                                       apiKey: "k", model: "m")
             XCTFail("有效推荐少于 3 个时应视为 malformed response")
         } catch BailianError.malformedResponse {
@@ -72,6 +76,7 @@ final class RecommendEngineTests: XCTestCase {
     func testOutcomeCarriesSummarizedCount() async throws {
         let s = snap(count: 6, summarized: 4)
         let outcome = try await engine.run(snapshot: s,
+                                            category: .ai,
                                             apiKey: "k", model: "m")
         XCTAssertEqual(outcome?.articleCount, 4, "articleCount 应为有摘要的数量")
     }

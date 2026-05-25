@@ -36,7 +36,7 @@ struct CategoryState: Sendable {
 
 /// 编排者（Facade）：聚合 @Published UI 状态、调度 RSS / Pipeline / Engine / FilterPipeline、原子提交持久化
 /// v2-multi-category: 内部状态全 per-cat（states dict）；旧 `service.dailyDigest` 等 API 保留作为 .ai cat
-/// 的 backward-compat view，让旧测试与 Phase 5 前的旧 UI 代码零侵入。
+/// 的测试便捷入口；生产 UI 应优先使用 `state(for:)`。
 @MainActor
 final class RefreshService: ObservableObject {
     /// 单例。两套机制并存：
@@ -49,7 +49,7 @@ final class RefreshService: ObservableObject {
 
     /// per-cat 状态字典。任何 cat 内字段变化都触发 @Published 通知（SwiftUI view 自动重渲染）。
     /// setter internal 而非 private —— 测试通过 @testable import 直接 set state；
-    /// 生产代码应走 mutate(_:_:) helper 或 backward-compat properties，不直接改 dict。
+    /// 生产代码应走 mutate(_:_:) helper，不直接改 dict。
     @Published var states: [AINewsBar.Category: CategoryState] =
         Dictionary(uniqueKeysWithValues: AINewsBar.Category.allCases.map { ($0, CategoryState()) })
 
@@ -65,12 +65,12 @@ final class RefreshService: ObservableObject {
     /// 与 lastRefreshDate 分离：旧实现复用 lastRefreshDate 做跨日判断会被 refresh() 末尾抹掉信号。
     var lastResetCheckDate: Date?
 
-    // MARK: - Backward-compat .ai cat shortcut properties
+    // MARK: - .ai cat shortcut properties
     //
-    // 旧测试 `service.dailyDigest` / 旧 UI 代码 `service.aiAvailability` 等访问，
-    // computed property 读 states[.ai]；SwiftUI 通过 @Published states 的变更通知自动重渲染。
+    // 测试可通过 `service.dailyDigest` / `service.aiAvailability` 等访问 .ai cat，
+    // computed property 读写 states[.ai]。
     // 写入通过 mutate(.ai)；setter 与 states[.ai] 等价。
-    // Phase 5 UI 切换到 selectedTab 时，UI 应直接读 service.state(for: cat) 不再走这些 shortcut。
+    // 生产 UI 直接读 service.state(for: cat)，避免多分类路径误落 .ai。
 
     var dailyDigest: String? {
         get { states[.ai]?.dailyDigest }

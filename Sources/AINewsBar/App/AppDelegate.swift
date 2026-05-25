@@ -48,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 1. 删 SwiftData store（schema 不兼容）
     /// 2. 用白名单方式清理 `com.ainewsbar.` 前缀业务 key（保留 API Key + Model）
     /// 3. 非 `com.ainewsbar.` 前缀的 key（如 launchAtLogin / SwiftUI 状态）自然保留
-    /// 4. 标记首次启动（Phase 4 据此仅触发 AI cat）
+    /// 4. 标记首次启动（启动刷新据此仅触发 AI cat）
     /// 用户决策：无数据迁移需求，全清接受。
     private static func performSchemaMigrationIfNeeded() {
         let defaults = UserDefaults.standard

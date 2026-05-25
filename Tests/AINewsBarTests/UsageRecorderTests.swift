@@ -20,7 +20,7 @@ final class UsageRecorderTests: XCTestCase {
 
     func testRecordPersistsEntry() throws {
         let recorder = UsageRecorder(context: ctx)
-        recorder.record(scene: .summary, model: "qwen-plus",
+        recorder.record(scene: .summary, category: .ai, model: "qwen-plus",
                         input: 120, output: 30, success: true)
 
         let all = try ctx.fetch(FetchDescriptor<UsageRecord>())
@@ -34,7 +34,7 @@ final class UsageRecorderTests: XCTestCase {
 
     func testNegativeInputsClampedToZero() throws {
         let recorder = UsageRecorder(context: ctx)
-        recorder.record(scene: .summary, model: "m",
+        recorder.record(scene: .summary, category: .ai, model: "m",
                         input: -10, output: -5, success: false)
         let all = try ctx.fetch(FetchDescriptor<UsageRecord>())
         XCTAssertEqual(all.first?.inputTokens, 0)

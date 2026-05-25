@@ -30,6 +30,7 @@ final class DigestEngineTests: XCTestCase {
 
     func testRunsWhenEnoughSummarized() async throws {
         let outcome = try await engine.run(snapshot: snap(summarized: 5),
+                                            category: .ai,
                                             apiKey: "k", model: "m")
         XCTAssertNotNil(outcome)
         XCTAssertEqual(ai.digestCallCount, 1)
@@ -37,6 +38,7 @@ final class DigestEngineTests: XCTestCase {
 
     func testReturnsNilBelow3Summarized() async throws {
         let outcome = try await engine.run(snapshot: snap(summarized: 2),
+                                            category: .ai,
                                             apiKey: "k", model: "m")
         XCTAssertNil(outcome, "<3 篇有摘要的不应生成日报")
         XCTAssertEqual(ai.digestCallCount, 0)
@@ -46,6 +48,7 @@ final class DigestEngineTests: XCTestCase {
         ai.digestError = URLError(.cannotConnectToHost)
         do {
             _ = try await engine.run(snapshot: snap(summarized: 5),
+                                      category: .ai,
                                       apiKey: "k", model: "m")
             XCTFail("应抛错")
         } catch {
@@ -56,6 +59,7 @@ final class DigestEngineTests: XCTestCase {
     func testOutcomeContent() async throws {
         ai.digestProvider = { _ in "今日要闻..." }
         let outcome = try await engine.run(snapshot: snap(summarized: 5),
+                                            category: .ai,
                                             apiKey: "k", model: "m")
         XCTAssertEqual(outcome?.content, "今日要闻...")
         XCTAssertEqual(outcome?.articleCount, 5)

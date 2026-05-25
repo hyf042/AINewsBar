@@ -2,7 +2,7 @@
 
 ## 项目背景
 
-macOS 菜单栏 AI 资讯阅读器。通过 `/grill-me` 技术访谈定义设计决策，从零完成全部实现（截至 2026-05-20 所有功能已完成并可运行）。当日通过第二次 `/grill-me` 16 轮访谈完成 4 项 ROI 最高的重构（错误治理/视图拆分/外观模式/全表 fetch 优化），详见 `docs/plans/optimization-plan.md`。
+macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财报 / 新闻 三 tab；v1 单 AI tab 阶段）。通过 `/grill-me` 技术访谈定义设计决策。v1 阶段（截至 2026-05-20）AI 单 tab 全部功能完成；v1 重构详见 `docs/plans/optimization-plan.md`；v2 multi-category 重构详见 `docs/plans/multi-category-redesign.md`。
 
 > **工作流约束（2026-05-24 起）**：本工程**不使用 superpowers 系列 skill**（`superpowers:*`，含 `writing-plans` / `executing-plans` / `subagent-driven-development` / `brainstorming` / `using-superpowers` 等）。规划/执行/code review 走通用流程（`/grill-me` 访谈 + 直接编辑实现 + 必要时手动调度 subagent），spec/plan 文档不再放 `docs/superpowers/`，需要时落 `docs/plans/`。
 
@@ -165,13 +165,14 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 
 ---
 
-## 已实现功能（持续迭代中，最后更新 2026-05-21）
+## 已实现功能（持续迭代中，最后更新 2026-05-25）
 
 **核心功能**
-1. RSS 抓取，11 个内置源，**全并发抓取**，每小时刷新，只保留当天文章，过期自动清理
-2. AI 单篇摘要：最多 5 并发生成，使用前 1500 字符内容，强制中文，无论原文语言
-3. 今日 AI 资讯摘要：基于标题+摘要生成 2-3 句概述，悬停临时展开/点击固定展开，max_tokens=300；含手动刷新按钮
-4. AI 今日推荐：AI 挑选 5 篇，基于标题+摘要综合判断，附摘要，不受已读状态影响；含手动刷新按钮
+1. RSS 抓取，**v2 起 27 个内置源（11 AI + 8 财报 + 8 新闻）**，全并发抓取，每小时刷新（per-cat 可关，v2.1），只保留当天文章，过期自动清理
+2. AI 单篇摘要：最多 5 并发生成，使用前 1500 字符内容，强制中文，无论原文语言；**v2 起 prompt per-cat 差异化**（AI 从业者 / 投资者 / 关心时事的读者）
+3. 今日摘要（per-cat 独立）：基于标题+摘要生成 2-3 句概述，max_tokens=300；含手动刷新按钮；**v2 起 prompt 与 UI 标题随 tab 切换**
+4. AI 今日推荐（per-cat 独立）：AI 挑选 5 篇，基于标题+摘要综合判断，附摘要，不受已读状态影响；含手动刷新按钮
+4.5. **v2 新增：AI Filter Stage**：财报 cat 启用 (CategoryConfig.filterPrompt)，入库后 5 并发跑 filter 判定"是/否财报类"，accepted=true 才进 UI；失败 3 次永久 reject；user 可标"纯净源"(Feed.skipFilter) 跳过省 token
 5. 推荐区/摘要区**骨架占位**：未生成时显示灰条 + "生成中…" 提示
 6. 已读文章显示在列表底部（"已读 (n)" 分隔行），标题色降低；Header 显示 [未读/总数]
 7. 订阅源开关：设置页 Toggle，关闭时删除该源文章
@@ -222,7 +223,7 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 | `Services/ServiceProtocols.swift` | `RSSFetching` / `AISummarizing`（含 model 参数）/ `PreferencesStoring`（含 getModel） |
 | `Services/RefreshDecision.swift` | 触发决策纯函数集：`completionRate` / `shouldRegenerateRecommend` / `shouldRegenerateDigest` / `withinRegenerationWindow`；时钟通过 `now:` 参数注入 |
 | `Services/RSSService.swift` | FeedKit 包装 actor；返回 `RawArticle: Sendable` 跨 actor 边界；`publishedAt: Date?` 缺失 pubDate 不伪造 |
-| `Services/BuiltInFeeds.swift` | 11 个内置源数据 + `syncInto(context:)`（启动时同步）+ `deduplicateArticles(context:)`（重建路径容灾） |
+| `Services/BuiltInFeeds.swift` | **v2: 27 个内置源**（11 AI + 8 财报 + 8 新闻，每个带 category）+ `syncInto(context:)`（启动时同步）+ `deduplicateArticles(context:)`（重建路径容灾） |
 | `Services/UsageRecording.swift` | UsageRecording 协议（`record` / `cleanupOlderThan`）+ extension 便利方法（`record(info:)` / `recordFailure`） |
 | `Services/UsageRecorder.swift` | SwiftData 后端 `UsageRecording` 实现，@MainActor；含静态查询 `todayTotalTokens(in:now:)` |
 | `Services/UsageAggregator.swift` | 纯函数 `todayStats` / `dailyByScene`，时钟通过参数注入；UI 与测试共用 |
@@ -270,9 +271,15 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 
 ---
 
-## 内置订阅源（11 个）
+## 内置订阅源（v2: 27 个 = 11 AI + 8 财报 + 8 新闻）
 
-OpenAI News, Google DeepMind, Hugging Face Blog, TechCrunch AI, The Verge AI, Ars Technica AI, The Decoder, MIT Tech Review, VentureBeat AI, TLDR AI, 量子位
+**AI (11)**：OpenAI News, Google DeepMind, Hugging Face Blog, TechCrunch AI, The Verge AI, Ars Technica AI, The Decoder, MIT Tech Review, VentureBeat AI, TLDR AI, 量子位
+
+**财报 (8, 6 en + 2 zh)**：Seeking Alpha, Apple Newsroom, CNBC Top News, Bloomberg Markets, Yahoo Finance, MarketWatch, FT 中文财经, 雪球热门
+
+**新闻 (8, 4 en + 4 zh)**：BBC News, NYT World, Hacker News Top, The Verge, 36 氪, 新华网, 人民日报, FT 中文新闻
+
+完整 URL 见 `Sources/AINewsBar/Services/BuiltInFeeds.swift`
 
 ---
 

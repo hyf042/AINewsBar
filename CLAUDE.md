@@ -84,11 +84,42 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 1. **Schema v2-multi-category**：Article/Feed/UsageRecord 加 `category: String` 冗余字段（SwiftData @Query 不支持 join，冗余 1 字段换 O(1) 过滤）；Article 加 `accepted: Bool?` / `filterFailCount`；Feed 加 `skipFilter`；UsageScene 加 `.filter`
 2. **Migration 全清策略**：`AppDelegate.makeContainer` schemaVersion 检测，不匹配则 nuke 旧 store + 白名单清 `com.ainewsbar.*` 旧 prefs（保留 API Key + Model + launchAtLogin + SwiftUI window 状态）+ 标 `firstLaunchAfterSchemaUpgrade`
 3. **FilterPipeline + AISummarizing 协议双轨**：新增 `classifyArticle`；3 套 cat-specific prompt（summary/recommend/digest）；财报 filter 判定"是/否"（max_tokens=10 / temperature=0.1 / 首字符容错）；失败 3 次永久 reject
-4. **RefreshService dict 化**：`@Published states: [Category: CategoryState]` + 12 个 backward-compat shortcut properties 走 `.ai`；per-cat `refreshTasks` inflight；timer fire `refreshAllCatsSequentially` 顺序遍历避免 QPS 峰值；首启 firstLaunch 仅触发 AI cat（财报/新闻 lazy on first tab switch）
+4. **RefreshService dict 化**：`@Published states: [Category: CategoryState]`（v2 阶段保留 12 个 .ai backward-compat shortcut，2026-05-25 晚间 H1 全删；setter 收紧到 `private(set)` + 公开 `markAvailability(_:for:)` + DEBUG `_testMutate`）；per-cat `refreshTasks` inflight；timer fire `refreshAllCatsConcurrently`（v2 阶段为 sequentially，2026-05-25 晚间 H5 改并发）；首启 firstLaunch 仅触发 AI cat（财报/新闻 lazy on first tab switch）
 5. **UI 全 cat 化**：新建 `CategoryTabBar` (HStack 3 等宽按钮替代 Picker.segmented 避免 macOS 内容宽度问题) + 6 子 view 接 `selectedTab` + Settings 4 Tab 加顶部 Picker；global vs per-cat banner 区分；`.id(selectedTab)` 让 cat 切换重建子 view 重置 `@State`
 6. **27 内置源**（curl 验证）：AI 11 不动 + 财报 8（6 en + 2 zh，中文财报 RSS 稀缺为 known limitation）+ 新闻 8（4 en + 4 zh）
 7. **测试 +37 case (149 → 186)**：FilterPipeline 10 / BailianServiceFilter 11 / RefreshServicePerCategory 8 / PreferencesServiceCategory 6 / CategoryConfig 7 / BuiltInFeeds +3
 8. **修正旧记录**：实际 `BailianService.recommendArticles` 与 UI 都是 **5 篇** 不是 3 篇（旧 CLAUDE.md 错记，本次同步修正第 156 行）
+
+**2026-05-25 晚间增量**：Linus 风格系统 review + 16 项修复（commit `3d57710` + `a11a8f5`，测试 186 → 208 = 199 XCTest + 9 Swift Testing）。流程：识别 review → 用户授权动手 → 分两批 commit → 公开 push。
+
+review 全清单分级处理：
+
+🔴 **CRITICAL**（1 项）
+- **C1**：`resetCrossedDayStateIfNeeded` else 分支是死代码——guard 已排除今日 + `loadPersistedState` 已清非今日 prefs，11 行 if/else 等价于 `lastResetCheckDate != nil` 单一 nil 检查。简化 + 注释说明设计意图，避免下次误以为 else 分支生效
+
+🟠 **HIGH**（6 项）
+- **H1**：删 12 个 `.ai` shortcut computed properties（dailyDigest / aiAvailability / lastRefreshDate 等 8 个 get/set + 3 个 get-only）；`@Published states` 改 `private(set)`；新增公开 `markAvailability(_:for:)` 供 View 用；新增 DEBUG-only `_testMutate(for:_:)` 给测试用；删两个 backward-compat 测试 + 加 `testMarkAvailabilitySetsOnlyTargetCat`
+- **H2**：`commitSummaries` 改用 SwiftData 自带 `context.rollback()` 替代旧"fetch + 手动 set aiSummary=nil + 再 save" 三步舞蹈——失败时内存与磁盘永久错位的隐患根除
+- **H3**：`runRefresh` 用 `capturedFetchErrors` 局部变量 + defer 保证入库失败 return 仍写 `lastFetchErrorCount`，Footer 不再显示历史值
+- **H4**：`GlobalAIError` 新增 `.forbidden` 枚举值；HTTP 401 → `invalidAPIKey` / 403 → `forbidden` 分流；banner 文案"API Key 有效，但当前模型未授权"区分 key 错 vs 模型未授权（DashScope 常见场景）
+- **H5**：`refreshAllCatsSequentially` 改 `refreshAllCatsConcurrently`（`withTaskGroup` 并发三 cat）；QPS 评估 3×5=15 对 30 QPS 安全；冷启动从 1-2 分钟降到 ~30 秒
+- **H6**：states setter `internal` 是测试污染生产代码——已并入 H1 一起做（`private(set)` + DEBUG hook）
+
+🟡 **MEDIUM**（5 项）
+- **M1**：filter 失败状态机（filterFailCount++ + 达上限 accepted=false + log）从 RefreshService 散落 if/else 收敛到 `Article.recordFilterFailure(maxBeforeReject:)` extension；caller 1 行调用
+- **M2**：`BuiltInFeeds.syncInto` categoryChanged 路径改"先改 feed.category 再用 feedID 删 articles"——成功路径下"feed.category 与 articles 状态"始终一致；rollback 保持原子事务等价
+- **M3**：`currentCredentials(cat:)` 按 CQS 拆分为 `currentCredentials()` (pure query 仅读 prefs) + `ensureCredentials(cat:)` (with side effects 缺 key 时设 globalAIError + per-cat unavailable)；4 处 caller 改 ensure
+- **M4**：`mutate(_:_:)` 加注释禁止递归调用——@MainActor 隔离下 `states[cat] = state` 同步触发 @Published 通知，递归会导致多次 view 重渲（当前无递归路径，防御性约定）
+- **M5**：Schema migration `try? FileManager.removeItem` 改 do/catch + 区分 `CocoaError.fileNoSuchFile` 正常路径 + 真错误 Log.write——之前权限/锁文件被占用导致删除失败完全静默，下面 ModelContainer 用旧 schema 抛错 → fallback in-memory 用户数据丢失
+
+🟢 **LOW**（3 项）
+- **L1**：`BailianService.makeSummaryPrompt / makeRecommendPrompt / makeDigestPrompt` 三个静态方法删 `category = .ai` 默认值——与 27ff4a6 "删 .ai default fallback"方向一致，测试也显式传；5 处 BailianServiceTests 调用补 `.ai`
+- **L2**：`Article.accepted` init default 从 `true` 改 `nil`——让"通过"成为显式行为，避免新建路径漏传时财报噪声泄漏到 UI；RefreshService.mergeNewArticles 已根据 needFilter / skipFilter 显式传值，测试侧零破坏
+- **L3**：`Category.from(rawValue:)` 解析失败 fallback `.ai` 前 Log.write——非 nil 但无法解析时打印 raw 值供 Console.app 排查；nil 是合法路径（首次启动 prefs 未 set）不报
+
+**意外副带 bug 修复**：`APISettingsView.checkConnection` 成功路径原只 `set refreshService.aiAvailability = .available`——只动了 `.ai` 一个 cat 的 availability，财报/新闻留 `.unknown`（multi-category 升级遗漏）。改为只清 `globalAIError`（testConnection 成功是全局信号），per-cat 状态由各自 refresh 自然修正。
+
+**累计变更**：14 文件 +233 / -178 = 净 **+55 行**（H1 删 shortcut 瘦身 vs H3-H5/M5 加防御性 do/catch + extension + 注释，互补方向）。
 
 ---
 
@@ -146,10 +177,17 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | DigestSection 折叠策略 | 默认 `isExpanded=true` 全展开 + 点击可折叠；去掉 hover 自动展开与 lineLimit(5) 收起态裁切 | 摘要本就是"一眼看完"，折叠违背设计意图；用户痛点是"差 1-2 行"——根因是 lineLimit(5) + AI 偶发输出 6-7 行（含 markdown 噪声更糟），双 bug 互相强化；保留点击折叠让"嫌长可手动收"的少数派可用 |
 | Category 维度落位（v2）| Feed/Article/UsageRecord 加 `category: String` 冗余字段（Article 从 feed 派生写入时保证一致）；Feed:Category 1:1；3 cat 硬编码 enum (`.ai/.earnings/.news`)；CategoryConfig 持有 per-cat filterPrompt + recommendCount | SwiftData @Query 不支持 join，1 字段冗余换 O(1) 过滤；3 cat 是产品决策不是数据（未来加 cat 必然要改 prompt/UI），enum 简单到位 |
 | Filter Stage 落位 | 入库后标 `accepted: Bool?`（nil/true/false）；财报 cat 必备 + 其他 cat 可选（CategoryConfig.filterPrompt 为 nil 则 skip）；filter 失败 3 次永久 reject | A "入库前 filter 丢 reject" 看似省事实际每次抓 RSS 都重判同一篇 reject 反复花 token；B 保留原始数据让 prompt 迭代时能 review "被错杀"案例 |
-| 协议双轨策略 | 改协议加 cat 参数时同步保留旧无 cat 签名走 protocol extension delegate to .ai（PreferencesStoring / AISummarizing / UsageRecording）| 让 Phase N 改协议时零侵入 Phase N+1 才改的调用方（如 Prefs 改造时 RefreshService 不动）；Phase 4 改造完后可删旧签名 |
-| RefreshService dict 化（v2）| `@Published states: [Category: CategoryState]` + 12 个 backward-compat shortcut computed properties 走 `.ai`；per-cat `refreshTasks` inflight；timer fire 顺序遍历避免 QPS 峰值；首启 firstLaunchAfterSchemaUpgrade 仅触发 AI cat | 保留 backward-compat properties 让旧测试 149 个零侵入；timer 顺序而非并发避免 3 cat × 5 并发 = 15 并发触 DashScope QPS 上限；首启 27 源全抓 1-2 分钟体验差，only AI 优先保首屏 |
-| Migration 全清策略（v2）| schemaVersion="v2-multi-category" 不匹配则 nuke 旧 store + 白名单清 `com.ainewsbar.*` 业务 key（保留 API Key + Model + launchAtLogin + SwiftUI window 状态）+ 标 firstLaunchAfterSchemaUpgrade | 用户接受历史数据全清；白名单 vs 全 domain 清掉是为保 launchAtLogin 等系统级 key |
+| 协议双轨策略 | v2 阶段 PreferencesStoring / AISummarizing / UsageRecording 改协议加 cat 时保留旧无 cat extension fallback 到 `.ai`；**2026-05-25 (27ff4a6) 全删过渡 fallback**，所有 caller 强制显式传 cat | 过渡期让 Phase N 改协议时零侵入 Phase N+1 才改的调用方；过渡期结束后必须删，否则新增 cat 时 caller "默认落 .ai" 静默漏改 |
+| RefreshService dict 化（v2 → review 后）| `@Published private(set) var states: [Category: CategoryState]`（v2 阶段 12 个 .ai shortcut + setter internal，**2026-05-25 晚间 H1 全删 + 收紧 private(set)**）；公开 `markAvailability(_:for:)` 给 View 用；DEBUG-only `_testMutate(for:_:)` 给测试用；per-cat `refreshTasks` inflight；timer fire `refreshAllCatsConcurrently`（**2026-05-25 晚间 H5 由顺序改并发**）；首启 firstLaunchAfterSchemaUpgrade 仅触发 AI cat | shortcut 是过渡期遗留 —— 留着新代码会图省事用 `service.dailyDigest` 让财报/新闻 cat 状态静默丢失；private(set) + 单一 markAvailability 入口杜绝绕过 mutate 直接改 dict；并发刷新 QPS 评估 3×5=15 对 30 QPS 安全，冷启动 1-2 分钟降到 ~30 秒 |
+| Migration 全清策略（v2）| schemaVersion="v2-multi-category" 不匹配则 nuke 旧 store + 白名单清 `com.ainewsbar.*` 业务 key（保留 API Key + Model + launchAtLogin + SwiftUI window 状态）+ 标 firstLaunchAfterSchemaUpgrade。**2026-05-25 晚间 M5**：删 sidecar 文件由 `try?` 改 do/catch + 区分 `fileNoSuchFile` 正常路径 + 真错误 Log.write | 用户接受历史数据全清；白名单 vs 全 domain 清掉是为保 launchAtLogin 等系统级 key；静默删除失败会让用户数据隐性丢失（fallback in-memory），必须能在 Console.app 看见信号 |
 | CategoryTabBar 实现（v2）| HStack 3 个 Button 等宽 `.frame(maxWidth: .infinity)` 替代 `Picker(.segmented)`；选中态 `unemphasizedSelectedContentBackgroundColor` + 0.5pt primary border + shadow + semibold 字重 | macOS Picker(.segmented) 按内容宽度无法等分撑满（vs iOS 行为不同，踩坑 #35）；选中态用 macOS native segmented selected 色保证明暗双适配（vs 自己用 dynamic provider 风险高）|
+| 跨日重置 guard 简化（review 后）| `resetCrossedDayStateIfNeeded` 的 shouldClearState 从 11 行 if/else 简化为 `lastResetCheckDate != nil` | guard 已排除今日 + loadPersistedState 已清非今日 prefs，原 else 分支永远 false；保留 11 行假装在做事会让下次改代码的人误以为生效。简化 + 注释说明设计意图 |
+| 摘要保存失败回滚（review 后）| `commitSummaries` 失败用 `context.rollback()` 替代旧"fetch + 手动 set aiSummary=nil + 再 save"舞蹈 | 手动舞蹈第二次 save 失败时内存 @Model 引用已被改回 nil 但磁盘仍持旧状态 → 永久错位。相信 SwiftData 内置 rollback：把内存改动回滚到 last save 是原子操作 |
+| AI 错误分级映射（review 后）| `GlobalAIError` 新增 `.forbidden` 与 `.invalidAPIKey` 分离：HTTP 401→invalidAPIKey / 403→forbidden / 429→quotaExceeded / 5xx→other / 网络→networkUnreachable | DashScope 403 常见是 key 有效但模型未授权（如开通了 qwen-plus 没开通 qwen3.6-plus），一锅炖映射 invalidAPIKey 让用户去设置看 key 在那里却被告知未配置；UI 文案区分"key 无效 vs 模型未授权"指引正确动作 |
+| credentials 查询 CQS（review 后）| `currentCredentials()` 纯查询（仅读 prefs）+ `ensureCredentials(cat:)` 显式 command（叠加 globalAIError / per-cat unavailable 副作用） | 旧 `currentCredentials(cat:)` 名似 query 实是 command，命名说谎；CQS 拆分让 caller 显式选择"我只想读"还是"我想读 + 失败时进入失败态" |
+| Article filter 失败状态机（review 后）| 收敛到 `Article.recordFilterFailure(maxBeforeReject:)` extension：`filterFailCount += 1` + 达上限 `accepted = false` | 旧 7 行 if/else 散在 RefreshService.runFilterStage；新增 filter cat 时容易漏改任一处。状态机归属 model 自身，caller 1 行调用 + 检查 `accepted == false` 决定是否 log |
+| Article.accepted 默认 nil（review 后）| init default 从 `true` 改 `nil`：未跑 filter 应为 nil（"未决定"），未来 caller 想跳过 filter 须显式传 `accepted: true` | 旧 `default true` 与设计意图（filter cat 入库时应 nil）相悖，新建路径漏传时财报噪声泄漏到 UI；改 nil 让"通过"成为显式行为 |
+| Category.from fallback 可观测（review 后）| 解析失败 fallback `.ai` 前 `Log.write("[Category] unknown rawValue 'X', falling back to .ai")`；nil 不报（合法首启路径） | 脏数据（未来加新 cat 再降级）静默打到 AI tab 污染推荐/日报；Log 让 Console.app 能看见信号 |
 
 ```bash
 cd /Users/hyf042/Projects/AINewsBar
@@ -165,7 +203,7 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 
 ---
 
-## 已实现功能（持续迭代中，最后更新 2026-05-25）
+## 已实现功能（持续迭代中，最后更新 2026-05-25 晚间 review 后）
 
 **核心功能**
 1. RSS 抓取，**v2 起 27 个内置源（11 AI + 8 财报 + 8 新闻）**，全并发抓取，每小时刷新（per-cat 可关，v2.1），只保留当天文章，过期自动清理
@@ -213,7 +251,7 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 ### Services（外观 + 组件）
 | 文件 | 说明 |
 |------|------|
-| `Services/RefreshService.swift` | **外观** (~470 行)：聚合 @Published UI 状态 + 编排 RSS/Pipeline/Engine + 原子 `commit(Outcome)`；`refresh` / `forceRegenerateRecommend` / `forceRegenerateDigest` 三个公开入口（前置统一调 `resetCrossedDayStateIfNeeded`）；`refreshTask: Task<Void,Never>?` inflight 复用避免双 commit；`lastResetCheckDate` 与 lastRefreshDate 解耦；`commitSummaries` 用 id 重 fetch alive Article；暴露 `stop()` 清 timer+task 给测试 tearDown |
+| `Services/RefreshService.swift` | **外观** (~890 行 v2 多分类后)：`@Published private(set) states: [Category: CategoryState]` per-cat dict（H1 删 12 个 .ai shortcut + setter 收紧）+ 编排 RSS/Pipeline/Engine/FilterPipeline + 原子 `commit(Outcome)`；公开 API：`refresh(_:)` / `forceRegenerateRecommend(_:)` / `forceRegenerateDigest(_:)` / `refreshIfNeeded(_:)` / `handleSystemWake()` / `markAvailability(_:for:)` / `state(for:)` / `isSummarizing(category:)` / `stop()`；DEBUG-only `_testMutate(for:_:)` 给测试用；per-cat `refreshTasks: [Category: Task<Void,Never>]` inflight 复用避免双 commit；`refreshAllCatsConcurrently` 用 TaskGroup（H5 由顺序改并发，冷启动 ~30s）；`runRefresh` 用 defer + capturedFetchErrors 保证 lastFetchErrorCount 一定写入（H3）；`commitSummaries` 用 `context.rollback()` 替代手动 fetch+nil+save 舞蹈（H2）；`currentCredentials()` 纯查询 + `ensureCredentials(cat:)` 副作用（M3 CQS 拆分） |
 | `Services/SummaryPipeline.swift` | 摘要并发管道：`run(tasks:apiKey:model:) -> Result` 有界并发（5 路）；多点检查 `_Concurrency.Task.isCancelled` 支持取消（取消独立 `.cancelled` 状态不计 failed 不记 UsageRecord）；空 summary trim 后降级 failure |
 | `Services/RecommendEngine.swift` | AI 推荐生成：`run(trigger:snapshot:apiKey:model:) -> Outcome?`；`Trigger.auto(...) / .forced` 枚举区分决策路径 |
 | `Services/DigestEngine.swift` | 今日日报生成：同 RecommendEngine 对称结构 |

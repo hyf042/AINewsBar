@@ -23,6 +23,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-25 | v2 多分类重构（Schema v2 / FilterPipeline / 27 源 / RefreshService dict 化 / Migration 全清 / CategoryTabBar）；测试 149 → 186 | `ec7f254` → `e3e8282` |
 | 2026-05-25 晚 | **Linus review 16 项**（C1+H1-H6+M1-M5+L1-L3）；测试 186 → 208 | `3d57710` `a11a8f5` |
 | 2026-05-25 夜 | 6 项设置持久化 / RSS Atom 边界加固：FeedSettingsStore 抽出 / openArticle 失败处理 / Atom rel=alternate 优先（踩坑 #38）；测试 208 → 212 | `b7a917f` |
+| 2026-05-25 深夜 | 第二轮 review 5 项：cleanup 严格化 / FeedRow guard 时序 / APISettings 设 globalAIError / UsageRecording 契约统一 (success=false 强制 0) / AppDelegate syncInto 失败处理；测试 212 → 214 | `bb866b0` |
+| 2026-05-25 深夜 (二) | 第三轮 review 3 项：跨日 cleanup 一致 strict / scheduleTimer 拆出 configure / summary commit 漏走 helper 修复 | `bbb9234` |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -107,6 +109,12 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | Article filter 失败状态机（review 后）| 收敛到 `Article.recordFilterFailure(maxBeforeReject:)` extension | 旧 7 行 if/else 散在 RefreshService.runFilterStage；状态机归属 model 自身 |
 | Article.accepted 默认 nil（review 后）| init default 从 `true` 改 `nil`：未跑 filter 应为 nil；要跳过 filter 须显式传 `accepted: true` | 旧 default 与设计意图相悖，新建路径漏传时财报噪声泄漏到 UI |
 | Category.from fallback 可观测（review 后）| 解析失败 fallback `.ai` 前 Log；nil 不报（合法首启路径） | 脏数据静默打到 AI tab 污染推荐/日报 |
+| cleanupOldArticles 一致 strict（bb866b0 + bbb9234）| per-cat 与全 cat 两版 cleanupOldArticles 都改 throw；runRefresh / resetCrossedDayStateIfNeeded 失败 rollback + return + 不推进 lastResetCheckDate | tolerant cleanup 失败被当空结果继续推进 → 留 pending delete 或推进 guard 当天不再重试 |
+| Timer 启动与 sync 成功解耦（bbb9234）| configure() 只注入依赖；scheduleTimer 移到 launchBackgroundRefreshIfNeeded 内部（!configured 守护）。AppDelegate sync 成功才调 launch... | sync 失败时旧路径 timer 仍 hourly 触发 → 0 文章 + lastRefreshDate 更新 → UI 显示"刚刚更新但永远是空" |
+| UsageRecording 契约：失败 ⇒ tokens=0（bb866b0）| helper `record(info:success:)` 在 success=false 时强制 input/output=0；caller 仍传真实 UsageInfo 由 helper 自动丢；协议文档明确"成功生效的用量"语义 | 旧契约自相矛盾（协议说失败=0 但 helper 透传 token）；与"今日用量按 success 过滤"UI 语义对齐；caller 不用每处自己归零 |
+| FeedRowView toggle guard 确定性时序（bb866b0）| catch 顺序：**先** arm guard → rollback + 改 oldValue → 末尾 `Task { @MainActor }` 兜底 reset。无论 onChange 实际触发与否 guard 都能解除 | 旧顺序 rollback 在前可能让 feed.isEnabled 已变回 oldValue → 改 oldValue 不触发 onChange → guard 永久卡 true → 吃掉下次真实 toggle |
+| APISettings 失败设 globalAIError（bb866b0）| checkConnection catch 调 `GlobalAIError.from(error) ?? .other(localizedDescription)` 设 refreshService.globalAIError | 旧路径只更新行内 checkStatus，菜单 UI 仍显示旧可用状态直到下轮 refresh，违背"用户在设置页看到失败时主 UI 也应同步"语义 |
+| AppDelegate syncInto 失败可见（bb866b0）| 检查 Bool 返回；失败 set globalAIError + skip launchBackgroundRefreshIfNeeded | 旧实现忽略返回值；feed 表可能空但 refresh 仍跑 → 0 文章 + lastRefreshDate 更新 |
 
 ---
 

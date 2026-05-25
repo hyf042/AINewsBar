@@ -161,13 +161,14 @@ final class RefreshService: ObservableObject {
 
     // MARK: - Public lifecycle
 
+    /// 注入依赖 + 恢复持久化状态。**不再启动 timer**（P2-B：configure 与
+    /// "启动后台 timer" 解耦，让 AppDelegate 在 BuiltInFeeds.syncInto 成功后
+    /// 才调 launchBackgroundRefreshIfNeeded 启动 timer，避免 sync 失败时 timer
+    /// 仍一小时一次清空"最后刷新时间"）。
     func configure(with context: ModelContext, usage: (any UsageRecording)? = nil) {
         modelContext = context
         self.usage = usage
         loadPersistedStateAllCats()
-        guard !configured else { return }
-        configured = true
-        scheduleTimer()
     }
 
     /// 主动清理 timer 和 inflight tasks。测试 tearDown 显式调用。
@@ -182,10 +183,18 @@ final class RefreshService: ObservableObject {
         configured = false
     }
 
-    /// 后台启动入口（AppDelegate 调用）。
+    /// 后台启动入口（AppDelegate 在 BuiltInFeeds.syncInto 成功后调用）。
+    /// **副作用**：启动 hourly timer（首次调用）+ 触发首轮刷新。
     /// v2: 首启 (firstLaunchAfterSchemaUpgrade=true) 仅刷新 AI cat（首屏 27 源全抓体验差）；
     /// 后续走 refreshAllCatsConcurrently 三 cat 并发。
     func launchBackgroundRefreshIfNeeded() {
+        // P2-B: timer 在此启动（不再 configure 里启）；sync 失败 AppDelegate 不
+        // 调本方法 → timer 永不启动，杜绝"sync 失败但 hourly timer 仍跑空"
+        if !configured {
+            configured = true
+            scheduleTimer()
+        }
+
         let isFirstLaunch = UserDefaults.standard.bool(forKey: "firstLaunchAfterSchemaUpgrade")
         if isFirstLaunch {
             UserDefaults.standard.set(false, forKey: "firstLaunchAfterSchemaUpgrade")
@@ -689,10 +698,12 @@ final class RefreshService: ObservableObject {
         }
 
         for item in result.completed {
+            // P3-A: 走 helper record(info:success:) 而非 root record(input:output:success:)，
+            // 让 persistSucceeded=false 时 token 自动归零（P3-B helper 契约统一）。
+            // 旧实现直接拆 inputTokens/outputTokens 调 root API 绕过了归零。
             usage?.record(
                 scene: .summary, category: cat, model: model,
-                input: item.usage.inputTokens, output: item.usage.outputTokens,
-                success: persistSucceeded
+                info: item.usage, success: persistSucceeded
             )
         }
         for _ in result.failedIds {
@@ -833,7 +844,16 @@ final class RefreshService: ObservableObject {
         if let last = lastResetCheckDate, Calendar.current.isDateInToday(last) { return }
 
         let startOfToday = Calendar.current.startOfDay(for: Date())
-        cleanupOldArticles(context: context, before: startOfToday)
+        // P2-A: cleanup 失败必须 rollback + 不推进 lastResetCheckDate +
+        // 不清 UI/prefs。旧 tolerant 路径会让 fetch 失败被当空结果，假装清成功
+        // 后推进 guard 到今天 → 当天不再重试跨日清理，旧文章可能继续显示。
+        do {
+            try cleanupOldArticles(context: context, before: startOfToday)
+        } catch {
+            context.rollback()
+            Log.write("[Refresh] cross-day cleanup failed, abort reset (will retry on next entry): \(error)")
+            return
+        }
 
         // 走到这里说明：lastResetCheckDate 要么 nil（首启），要么非今日（真跨日）。
         // 首启 case：loadPersistedState 已把"非今日 prefs"清掉，内存里 lastRefreshDate
@@ -882,13 +902,17 @@ final class RefreshService: ObservableObject {
         try context.safeSaveOrThrow()
     }
 
-    /// 全 cat 清旧文章（跨日重置内用）
-    private func cleanupOldArticles(context: ModelContext, before date: Date) {
-        let old = context.safeFetch(
+    /// 全 cat 清旧文章（跨日重置内用）。
+    /// 严格版（与 per-cat 对齐）：失败抛出，让 caller 决定 rollback + 不推进
+    /// lastResetCheckDate，避免 tolerant 路径在 fetch 失败时假装清成功 + 推进
+    /// guard 导致当天不再重试跨日清理。
+    private func cleanupOldArticles(context: ModelContext, before date: Date) throws {
+        let old = try context.safeFetchOrThrow(
             FetchDescriptor<Article>(predicate: #Predicate { $0.publishedAt < date })
         )
+        guard !old.isEmpty else { return }
         old.forEach { context.delete($0) }
-        if !old.isEmpty { context.safeSave() }
+        try context.safeSaveOrThrow()
     }
 }
 

@@ -2,14 +2,18 @@ import XCTest
 @testable import AINewsBar
 
 final class AIErrorMappingTests: XCTestCase {
-    func testHTTP401And403MapToInvalidAPIKey() {
+    func testHTTP401MapsToInvalidAPIKey() {
         XCTAssertEqual(
             GlobalAIError.from(BailianError.httpStatus(code: 401, bodySnippet: "")),
             .invalidAPIKey
         )
+    }
+
+    // H4: 403 不再一锅炖映射为 invalidAPIKey；403 常见是"key 有效但模型未授权"
+    func testHTTP403MapsToForbidden() {
         XCTAssertEqual(
             GlobalAIError.from(BailianError.httpStatus(code: 403, bodySnippet: "")),
-            .invalidAPIKey
+            .forbidden
         )
     }
 

@@ -109,7 +109,8 @@ struct MenuBarView: View {
     private func globalBanner(error: GlobalAIError) -> some View {
         let message: String
         switch error {
-        case .invalidAPIKey:       message = "未配置 API Key"
+        case .invalidAPIKey:       message = "API Key 无效或未配置"
+        case .forbidden:           message = "API Key 有效，但当前模型未授权（请检查模型开通状态）"
         case .networkUnreachable:  message = "网络不可达"
         case .quotaExceeded:       message = "API 配额超限"
         case .other(let msg):      message = msg

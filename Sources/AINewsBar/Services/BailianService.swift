@@ -99,9 +99,10 @@ actor BailianService: AISummarizing {
     // MARK: - Prompt 构造（纯函数，可单测）
 
     /// AI 摘要 prompt。per-cat 文案差异化（关注点、术语）；通用约束：中文 + 50 字内 + 纯文本。
-    /// category 默认 .ai 方便测试调用（生产调用必显式传）。
+    /// L1: 删除 category 默认值 —— 与 27ff4a6 "删 .ai fallback" 方向一致，
+    /// 测试也显式传，避免"默认落 .ai"在新增 cat 时静默漏改。
     static func makeSummaryPrompt(
-        title: String, content: String?, category: AINewsBar.Category = .ai
+        title: String, content: String?, category: AINewsBar.Category
     ) -> String {
         let focus: String
         switch category {
@@ -121,9 +122,9 @@ actor BailianService: AISummarizing {
     }
 
     /// AI 推荐 prompt。per-cat 关注角度差异化（AI 从业者 / 投资者 / 关心时事的读者）。
-    /// category 默认 .ai 方便测试调用（生产调用必显式传）。
+    /// L1: 删除 category 默认值（同 makeSummaryPrompt）。
     static func makeRecommendPrompt(
-        items: [ArticleSnapshot.Item], category: AINewsBar.Category = .ai
+        items: [ArticleSnapshot.Item], category: AINewsBar.Category
     ) -> String {
         let list = items.prefix(50).enumerated()
             .map { i, item -> String in
@@ -151,9 +152,9 @@ actor BailianService: AISummarizing {
     }
 
     /// AI 日报 prompt。per-cat 总结角度差异化。
-    /// category 默认 .ai 方便测试调用（生产调用必显式传）。
+    /// L1: 删除 category 默认值（同 makeSummaryPrompt）。
     static func makeDigestPrompt(
-        items: [ArticleSnapshot.Item], category: AINewsBar.Category = .ai
+        items: [ArticleSnapshot.Item], category: AINewsBar.Category
     ) -> String {
         // 防御性：nil-summary 项跳过；caller 通常已传 summarized 子集
         let lines = items.prefix(20).compactMap { item -> String? in

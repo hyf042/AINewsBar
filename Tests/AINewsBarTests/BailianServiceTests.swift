@@ -77,20 +77,20 @@ final class BailianServiceTests: XCTestCase {
     // MARK: - Prompt 构造
 
     func testSummaryPromptIncludesTitle() {
-        let prompt = BailianService.makeSummaryPrompt(title: "OpenAI 发布新模型", content: "正文内容...")
+        let prompt = BailianService.makeSummaryPrompt(title: "OpenAI 发布新模型", content: "正文内容...", category: .ai)
         XCTAssertTrue(prompt.contains("OpenAI 发布新模型"))
         XCTAssertTrue(prompt.contains("正文内容"))
         XCTAssertTrue(prompt.contains("中文"))
     }
 
     func testSummaryPromptHandlesNilContent() {
-        let prompt = BailianService.makeSummaryPrompt(title: "T", content: nil)
+        let prompt = BailianService.makeSummaryPrompt(title: "T", content: nil, category: .ai)
         XCTAssertTrue(prompt.contains("无正文"))
     }
 
     func testSummaryPromptTruncatesLongContent() {
         let long = String(repeating: "a", count: 3000)
-        let prompt = BailianService.makeSummaryPrompt(title: "T", content: long)
+        let prompt = BailianService.makeSummaryPrompt(title: "T", content: long, category: .ai)
         // prompt 包含前 1500 字符但不应包含完整 3000
         XCTAssertFalse(prompt.contains(long))
         XCTAssertTrue(prompt.contains(String(repeating: "a", count: 1500)))
@@ -102,7 +102,7 @@ final class BailianServiceTests: XCTestCase {
             .init(id: UUID(), title: "B", summary: nil),
             .init(id: UUID(), title: "C", summary: "sc")
         ]
-        let prompt = BailianService.makeRecommendPrompt(items: items)
+        let prompt = BailianService.makeRecommendPrompt(items: items, category: .ai)
         XCTAssertTrue(prompt.contains("1. A"))
         XCTAssertTrue(prompt.contains("2. B"))
         XCTAssertTrue(prompt.contains("3. C"))
@@ -114,7 +114,7 @@ final class BailianServiceTests: XCTestCase {
         let items = (0..<100).map { i in
             ArticleSnapshot.Item(id: UUID(), title: "T\(i)", summary: "s\(i)")
         }
-        let prompt = BailianService.makeRecommendPrompt(items: items)
+        let prompt = BailianService.makeRecommendPrompt(items: items, category: .ai)
         XCTAssertTrue(prompt.contains("50. T49"))
         XCTAssertFalse(prompt.contains("51. T50"), "超过 50 的应被截断")
     }
@@ -124,7 +124,7 @@ final class BailianServiceTests: XCTestCase {
             .init(id: UUID(), title: "A", summary: "sa"),
             .init(id: UUID(), title: "B", summary: "sb")
         ]
-        let prompt = BailianService.makeDigestPrompt(items: items)
+        let prompt = BailianService.makeDigestPrompt(items: items, category: .ai)
         XCTAssertTrue(prompt.contains("A｜sa"))
         XCTAssertTrue(prompt.contains("B｜sb"))
         XCTAssertTrue(prompt.contains("中文"))
@@ -134,7 +134,7 @@ final class BailianServiceTests: XCTestCase {
         let items = (0..<30).map { i in
             ArticleSnapshot.Item(id: UUID(), title: "T\(i)", summary: "s\(i)")
         }
-        let prompt = BailianService.makeDigestPrompt(items: items)
+        let prompt = BailianService.makeDigestPrompt(items: items, category: .ai)
         XCTAssertTrue(prompt.contains("T19｜s19"))
         XCTAssertFalse(prompt.contains("T20｜s20"))
     }
@@ -146,7 +146,7 @@ final class BailianServiceTests: XCTestCase {
             .init(id: UUID(), title: "B", summary: nil),
             .init(id: UUID(), title: "C", summary: "sc")
         ]
-        let prompt = BailianService.makeDigestPrompt(items: items)
+        let prompt = BailianService.makeDigestPrompt(items: items, category: .ai)
         XCTAssertTrue(prompt.contains("A｜sa"))
         XCTAssertFalse(prompt.contains("- B"), "nil-summary 项应跳过")
         XCTAssertTrue(prompt.contains("C｜sc"))

@@ -9,8 +9,13 @@ enum AIAvailability: Equatable, Sendable {
 
 /// 全局 AI 错误（v2-multi-category 新增）：与 per-cat 业务错误区分。
 /// API Key / 网络 / 配额等问题影响所有 cat，UI 顶部 sticky banner 显示一条。
+///
+/// H4: 拆分 invalidAPIKey vs forbidden —— DashScope 401 是 key 错，403 常见是
+/// "key 有效但模型未授权"（用户开通了 qwen-plus 没开通 qwen3.6-plus）。一锅炖会让
+/// 用户去设置看 key 在那里却被告知"未配置"，怀疑代码 bug。
 enum GlobalAIError: Equatable, Sendable {
-    case invalidAPIKey
+    case invalidAPIKey       // HTTP 401
+    case forbidden           // HTTP 403 —— 模型未授权 / 账号权限不足
     case networkUnreachable
     case quotaExceeded
     case other(String)
@@ -81,6 +86,9 @@ final class RefreshService: ObservableObject {
         mutate(cat) { $0.aiAvailability = availability }
     }
 
+    /// 单一变更点。约定：block 内**禁止递归调 mutate**（哪怕跨 cat），否则
+    /// `states[cat] = state` 会触发多次 @Published 通知，导致 SwiftUI 多次重渲。
+    /// 当前所有 caller 都是简单字段赋值，无递归路径。
     private func mutate(_ cat: AINewsBar.Category, _ block: (inout CategoryState) -> Void) {
         var state = states[cat] ?? CategoryState()
         block(&state)
@@ -270,7 +278,18 @@ final class RefreshService: ObservableObject {
     private func runRefresh(_ cat: AINewsBar.Category) async {
         guard !state(for: cat).isRefreshing, let context = modelContext else { return }
         mutate(cat) { $0.isRefreshing = true; $0.lastError = nil }
-        defer { mutate(cat) { $0.isRefreshing = false } }
+
+        // H3: 用 defer + 局部 capture 兜底 lastFetchErrorCount。
+        // 旧实现把"set lastFetchErrorCount"放在入库后；入库失败 return
+        // 时永远不执行，Footer 显示历史值（让用户以为 0 失败但实际全失败）。
+        // 任何 fetchAll 成功路径都先 capture 到 capturedErrors，defer 保证写入。
+        var capturedFetchErrors: [String] = []
+        defer {
+            mutate(cat) {
+                $0.isRefreshing = false
+                $0.lastFetchErrorCount = capturedFetchErrors.count
+            }
+        }
 
         let startOfToday = Calendar.current.startOfDay(for: Date())
         cleanupOldArticles(context: context, category: cat, before: startOfToday)
@@ -293,6 +312,7 @@ final class RefreshService: ObservableObject {
         }
 
         let (rawResults, fetchErrors) = await fetchAllFeeds(feeds: feeds)
+        capturedFetchErrors = fetchErrors   // defer 读取该值写回 state
         let newArticles = mergeNewArticles(
             cat: cat,
             rawResults: rawResults,
@@ -307,12 +327,11 @@ final class RefreshService: ObservableObject {
             } catch {
                 context.rollback()
                 mutate(cat) { $0.lastError = "数据库保存失败，跳过本次刷新" }
-                return
+                return  // defer 仍会写 lastFetchErrorCount = capturedFetchErrors.count
             }
         }
 
         mutate(cat) {
-            $0.lastFetchErrorCount = fetchErrors.count
             if !fetchErrors.isEmpty && newArticles.isEmpty { $0.lastError = fetchErrors.first }
             $0.lastRefreshDate = Date()
         }
@@ -351,7 +370,7 @@ final class RefreshService: ObservableObject {
             return false
         }
         guard !pending.isEmpty else { return true }
-        guard let (apiKey, model) = currentCredentials(cat: cat) else { return false }
+        guard let (apiKey, model) = ensureCredentials(cat: cat) else { return false }
 
         let tasks = pending.map {
             FilterPipeline.Task(
@@ -389,9 +408,8 @@ final class RefreshService: ObservableObject {
                 } else if rejectedSet.contains(article.id) {
                     article.accepted = false
                 } else if failedSet.contains(article.id) {
-                    article.filterFailCount += 1
-                    if article.filterFailCount >= filterMaxFailures {
-                        article.accepted = false
+                    article.recordFilterFailure(maxBeforeReject: filterMaxFailures)
+                    if article.accepted == false {
                         Log.write("[Filter][\(catRaw)] permanently rejecting after \(filterMaxFailures) failures: \(article.title.prefix(30))")
                     }
                 }
@@ -426,7 +444,7 @@ final class RefreshService: ObservableObject {
         if let existing = refreshTasks[cat] { await existing.value }
 
         guard !state(for: cat).isRegeneratingRecommend, let context = modelContext else { return }
-        guard let (apiKey, model) = currentCredentials(cat: cat) else { return }
+        guard let (apiKey, model) = ensureCredentials(cat: cat) else { return }
         mutate(cat) { $0.isRegeneratingRecommend = true }
         defer { mutate(cat) { $0.isRegeneratingRecommend = false } }
 
@@ -445,7 +463,7 @@ final class RefreshService: ObservableObject {
         if let existing = refreshTasks[cat] { await existing.value }
 
         guard !state(for: cat).isRegeneratingDigest, let context = modelContext else { return }
-        guard let (apiKey, model) = currentCredentials(cat: cat) else { return }
+        guard let (apiKey, model) = ensureCredentials(cat: cat) else { return }
         mutate(cat) { $0.isRegeneratingDigest = true }
         defer { mutate(cat) { $0.isRegeneratingDigest = false } }
 
@@ -485,7 +503,7 @@ final class RefreshService: ObservableObject {
     // MARK: - Private: AI pipeline (per-cat)
 
     private func processAI(cat: AINewsBar.Category, context: ModelContext, hasNewArticles: Bool) async {
-        guard let (apiKey, model) = currentCredentials(cat: cat) else { return }
+        guard let (apiKey, model) = ensureCredentials(cat: cat) else { return }
 
         let catRaw = cat.rawValue
         let pendingTasks: [SummaryPipeline.Task]
@@ -741,17 +759,26 @@ final class RefreshService: ObservableObject {
 
     // MARK: - Private: misc
 
-    /// per-cat credentials 查询。API Key 缺失时同时设 globalAIError + per-cat aiAvailability。
-    private func currentCredentials(cat: AINewsBar.Category) -> (apiKey: String, model: String)? {
+    /// M3: 纯查询 —— 读 prefs 返回 credentials；无副作用，可测可复用。
+    /// 不设 globalAIError / aiAvailability。caller 若需要"缺 key 时进入失败状态"，
+    /// 走 ensureCredentials(cat:)。
+    private func currentCredentials() -> (apiKey: String, model: String)? {
         let key = prefs.getAPIKey() ?? ""
-        guard !key.isEmpty else {
+        guard !key.isEmpty else { return nil }
+        return (key, prefs.getModel())
+    }
+
+    /// M3: 命令式 —— 在 currentCredentials 上叠加副作用：缺 key 时设 global +
+    /// per-cat unavailable；存在则清掉之前可能被 set 的 invalidAPIKey error。
+    /// 名字明示"会改 state"，与 query-only 的 currentCredentials 区分。
+    private func ensureCredentials(cat: AINewsBar.Category) -> (apiKey: String, model: String)? {
+        guard let creds = currentCredentials() else {
             globalAIError = .invalidAPIKey
             mutate(cat) { $0.aiAvailability = .unavailable("未配置 API Key") }
             return nil
         }
-        // API Key 存在时清 global error（之前可能因 key 缺失设过）
         if globalAIError == .invalidAPIKey { globalAIError = nil }
-        return (key, prefs.getModel())
+        return creds
     }
 
     private func applyGlobalAIErrorIfNeeded(_ error: Error) {
@@ -854,8 +881,10 @@ extension GlobalAIError {
             switch bailian {
             case .httpStatus(let code, _):
                 switch code {
-                case 401, 403:
+                case 401:
                     return .invalidAPIKey
+                case 403:
+                    return .forbidden
                 case 429:
                     return .quotaExceeded
                 case 500...599:

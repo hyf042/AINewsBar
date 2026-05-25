@@ -58,9 +58,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Log.write("[Migration] schema version mismatch: \(stored ?? "nil") → \(currentSchemaVersion), wiping...")
 
         // 1. 删 SwiftData store（含 -shm / -wal sidecars）
+        // M4: 失败不能静默 —— 权限/锁文件被占用导致删除失败时，下面 ModelContainer
+        // 用旧 schema 数据库继续 → 抛错 → fallback in-memory（用户数据丢失）。
+        // 至少记录失败原因供 Console.app 排查。
         for suffix in ["", "-shm", "-wal"] {
             let url = URL.applicationSupportDirectory.appending(path: "default.store\(suffix)")
-            try? FileManager.default.removeItem(at: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch CocoaError.fileNoSuchFile {
+                // 正常路径：sidecar 文件不存在
+            } catch {
+                Log.write("[Migration] failed to delete \(url.lastPathComponent): \(error)")
+            }
         }
 
         // 2. 白名单清理：删 `com.ainewsbar.` 前缀且非保留项的 key
@@ -98,7 +107,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.write("ModelContainer failed, resetting store: \(error)")
             for suffix in ["", "-shm", "-wal"] {
                 let url = URL.applicationSupportDirectory.appending(path: "default.store\(suffix)")
-                try? FileManager.default.removeItem(at: url)
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch CocoaError.fileNoSuchFile {
+                    // 正常路径
+                } catch {
+                    Log.write("[Migration] reset failed to delete \(url.lastPathComponent): \(error)")
+                }
             }
             do {
                 let c = try ModelContainer(for: schema, configurations: config)

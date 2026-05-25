@@ -80,19 +80,22 @@ enum BuiltInFeeds {
 
             // URL 稳定但元数据变化时也要同步；Article 冗余了 category/feedTitle，
             // category 变化时直接删旧文章，避免跨 tab 污染。
+            // M2: 先改 feed.category 再删 articles（按 feedID 查不按 category）。
+            // 旧实现先删再改，若中间出错 rollback 后 feed.category 仍是旧值，
+            // 下次启动反复重试同一删除。新顺序对 rollback 等价（事务原子），
+            // 但成功路径下"feed.category 与 articles 状态"始终一致。
             for feed in existing {
                 guard let expected = expectedByURL[feed.url] else { continue }
                 let categoryChanged = feed.category != expected.category.rawValue
                 let titleChanged = feed.title != expected.title
+                let feedID = feed.id
                 if categoryChanged {
-                    let feedID = feed.id
+                    feed.category = expected.category.rawValue
                     let articles = try context.safeFetchOrThrow(
                         FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
                     )
                     articles.forEach { context.delete($0) }
-                    feed.category = expected.category.rawValue
                 } else if titleChanged {
-                    let feedID = feed.id
                     let articles = try context.safeFetchOrThrow(
                         FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
                     )

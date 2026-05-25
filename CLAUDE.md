@@ -22,6 +22,7 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-24 | MarkdownStripper（AI 输出净化）+ DigestSection 默认展开 + Prompt 加纯文本约束 | — |
 | 2026-05-25 | v2 多分类重构（Schema v2 / FilterPipeline / 27 源 / RefreshService dict 化 / Migration 全清 / CategoryTabBar）；测试 149 → 186 | `ec7f254` → `e3e8282` |
 | 2026-05-25 晚 | **Linus review 16 项**（C1+H1-H6+M1-M5+L1-L3）；测试 186 → 208 | `3d57710` `a11a8f5` |
+| 2026-05-25 夜 | 6 项设置持久化 / RSS Atom 边界加固：FeedSettingsStore 抽出 / openArticle 失败处理 / Atom rel=alternate 优先（踩坑 #38）；测试 208 → 212 | `b7a917f` |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -146,6 +147,7 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 - `Services/RefreshDecision.swift` — 触发决策纯函数集，时钟参数注入
 - `Services/RSSService.swift` — FeedKit actor；`RawArticle.publishedAt: Date?`（nil 不入库 #17）；UA + Accept header 防 403
 - `Services/BuiltInFeeds.swift` — **v2: 27 内置源**；`syncInto(context:)` strict 同步 + categoryChanged 路径先改 feed 再删 articles（M2）；`deduplicateArticles` 重建容灾
+- `Services/FeedSettingsStore.swift` — 集中处理 feed 启停/删除：`persistBuiltInEnabledChange` / `deleteCustomFeeds`；strict 删 articles + 失败 rollback；调用方负责 UI 状态回滚
 - `Services/UsageRecording.swift` / `UsageRecorder.swift` / `UsageAggregator.swift` / `UsageFormatter.swift` — Token 用量协议/SwiftData 实现/纯函数聚合/格式化
 
 ### Models
@@ -293,3 +295,6 @@ v2: 27 个 = 11 AI + 8 财报 + 8 新闻。完整列表见 `Sources/AINewsBar/Se
 
 ### 37. 启动期 RSS fetch 失败常见 race（DNS / 网络栈未就绪）
 **根因**：AppDelegate 启动期触发 refresh 时 macOS networking 可能未就绪。**修复**：UI 标明数据时态（"⚠ 上次 X 源失败 · 点击重试"）+ 按钮直接重试当前 cat。心得：延迟启动 N 秒影响首屏；正解是标"过去时态" + 一键重试。
+
+### 38. Atom 解析 `entry.links?.first` 可能拿到 rel=self 非文章 URL
+**根因**：Atom 规范允许 `<link rel="self">` 指向 feed 自身、`<link rel="alternate">` 才是文章 HTML 链接。FeedKit 返回顺序无保证，`first` 可能拿到 rel=self URL → UI 打开文章却跳到 RSS 源本身。**修复**：`preferredAtomLink` 静态方法优先选 `rel=alternate + type=text/html`，再 fallback `rel=alternate`，最后 fallback first（兼容缺 rel 的源）。心得：标准里有多个等价语义的字段时，规范的优先级永远不能依赖第三方库的迭代顺序。

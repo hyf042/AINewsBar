@@ -8,6 +8,7 @@ struct HeaderView: View {
     @EnvironmentObject private var refreshService: RefreshService
 
     private var perCatState: CategoryState { refreshService.state(for: category) }
+    private var isCurrentCatSummarizing: Bool { refreshService.isSummarizing(category: category) }
 
     private var title: String {
         switch category {
@@ -23,7 +24,7 @@ struct HeaderView: View {
                 .font(Typography.headline)
                 .foregroundStyle(TextColor.primary)
             Spacer()
-            if refreshService.isSummarizing {
+            if isCurrentCatSummarizing {
                 HStack(spacing: 4) {
                     ProgressView()
                         .scaleEffect(0.55)
@@ -44,7 +45,7 @@ struct HeaderView: View {
                     .font(Typography.body)
             }
             .buttonStyle(.plain)
-            .disabled(perCatState.isRefreshing || refreshService.isSummarizing)
+            .disabled(perCatState.isRefreshing || isCurrentCatSummarizing)
             .help("刷新当前 tab")
             .keyboardShortcut("r", modifiers: .command)
         }

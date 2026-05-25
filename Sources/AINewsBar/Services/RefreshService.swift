@@ -53,8 +53,8 @@ final class RefreshService: ObservableObject {
     @Published var states: [AINewsBar.Category: CategoryState] =
         Dictionary(uniqueKeysWithValues: AINewsBar.Category.allCases.map { ($0, CategoryState()) })
 
-    /// 摘要 pipeline 是否在跑（瞬时 UI flag，与 cat 无关——同时只有一个 cat 在 refresh，
-    /// 因为 timer 顺序遍历 + per-cat inflight 互斥）。Phase 5 UI 可显示 progress。
+    /// 摘要 pipeline 是否在跑（全局兼容 flag）。UI 新代码优先使用
+    /// `isSummarizing(category:)`，避免一个 tab 的 AI 处理禁用所有 tab。
     @Published var isSummarizing = false
 
     /// 全局 AI 错误（如 API Key 错 / 网络错）。与 per-cat aiAvailability 区分：
@@ -114,6 +114,10 @@ final class RefreshService: ObservableObject {
         states[cat] ?? CategoryState()
     }
 
+    func isSummarizing(category cat: AINewsBar.Category) -> Bool {
+        activeSummaryPipelineCats.contains(cat)
+    }
+
     private func mutate(_ cat: AINewsBar.Category, _ block: (inout CategoryState) -> Void) {
         var state = states[cat] ?? CategoryState()
         block(&state)
@@ -157,9 +161,9 @@ final class RefreshService: ObservableObject {
     /// force* 入口也 await 同 cat 的 task 完成，避免 auto+force 并发 commit 互相覆盖
     private var refreshTasks: [AINewsBar.Category: Task<Void, Never>] = [:]
 
-    /// 正在运行摘要 pipeline 的 cat 数。`isSummarizing` 是公开 UI flag，
-    /// 但 v2 允许 cross-cat refresh 并发，不能让先结束的 cat 把全局 Bool 提前清掉。
-    private var activeSummaryPipelineCount = 0
+    /// 正在运行摘要 pipeline 的 cat 集合。全局 `isSummarizing` 从集合派生，保留旧 API；
+    /// UI 可查询当前 cat，避免 cross-cat 并发时误禁用其他 tab。
+    private var activeSummaryPipelineCats: Set<AINewsBar.Category> = []
 
     // MARK: - Init
 
@@ -194,7 +198,7 @@ final class RefreshService: ObservableObject {
         timer = nil
         for (_, task) in refreshTasks { task.cancel() }
         refreshTasks.removeAll()
-        activeSummaryPipelineCount = 0
+        activeSummaryPipelineCats.removeAll()
         isSummarizing = false
         configured = false
     }
@@ -215,6 +219,13 @@ final class RefreshService: ObservableObject {
                 await self?.refreshAllCatsSequentially()
             }
         }
+    }
+
+    /// 系统从睡眠唤醒后的兜底入口：先做跨日重置，再按 cat 顺序检查刷新。
+    /// 这是后台自动刷新语义，仍尊重 per-cat auto-refresh 开关。
+    func handleSystemWake() async {
+        resetCrossedDayStateIfNeeded()
+        await refreshAllCatsSequentially()
     }
 
     /// 三 cat 顺序刷新（timer fire 与首启非首次都走此路径，避免 token QPS 峰值）。
@@ -497,9 +508,9 @@ final class RefreshService: ObservableObject {
         if pendingTasks.isEmpty {
             coverage = true
         } else {
-            beginSummaryPipeline()
+            beginSummaryPipeline(cat)
             let result = await summaryPipeline.run(tasks: pendingTasks, apiKey: apiKey, model: model)
-            endSummaryPipeline()
+            endSummaryPipeline(cat)
             if let globalError = result.globalError {
                 self.globalAIError = globalError
             }
@@ -752,14 +763,14 @@ final class RefreshService: ObservableObject {
         }
     }
 
-    private func beginSummaryPipeline() {
-        activeSummaryPipelineCount += 1
-        isSummarizing = true
+    private func beginSummaryPipeline(_ cat: AINewsBar.Category) {
+        activeSummaryPipelineCats.insert(cat)
+        isSummarizing = !activeSummaryPipelineCats.isEmpty
     }
 
-    private func endSummaryPipeline() {
-        activeSummaryPipelineCount = max(0, activeSummaryPipelineCount - 1)
-        isSummarizing = activeSummaryPipelineCount > 0
+    private func endSummaryPipeline(_ cat: AINewsBar.Category) {
+        activeSummaryPipelineCats.remove(cat)
+        isSummarizing = !activeSummaryPipelineCats.isEmpty
     }
 
     /// 跨日全 cat 重置：lastResetCheckDate 不在今天时执行。

@@ -129,9 +129,32 @@ final class RefreshServicePerCategoryTests: XCTestCase {
         try? await _Concurrency.Task.sleep(nanoseconds: 90_000_000)
         XCTAssertTrue(service.isSummarizing,
                       "AI cat 结束但 news cat 仍在摘要时，全局 summarizing flag 不能提前变 false")
+        XCTAssertFalse(service.isSummarizing(category: .ai),
+                       "AI cat 摘要结束后，不应继续禁用 AI tab 操作")
+        XCTAssertTrue(service.isSummarizing(category: .news),
+                      "News cat 仍在摘要时，只应标记 news tab 生成中")
 
         _ = await (aiRefresh, newsRefresh)
         XCTAssertFalse(service.isSummarizing)
+        XCTAssertFalse(service.isSummarizing(category: .ai))
+        XCTAssertFalse(service.isSummarizing(category: .news))
+    }
+
+    func testSystemWakeRefreshesAllEnabledCats() async {
+        prefs.apiKey = "test-key"
+        let aiFeed = seedFeed("https://ai.com/feed", title: "AI Feed", category: .ai)
+        let earningsFeed = seedFeed("https://earn.com/feed", title: "Earn Feed", category: .earnings)
+        let newsFeed = seedFeed("https://news.com/feed", title: "News Feed", category: .news)
+        rss.setSuccess(aiFeed.url, [makeRaw("https://a/1", title: "AI")])
+        rss.setSuccess(earningsFeed.url, [makeRaw("https://e/1", title: "Earnings")])
+        rss.setSuccess(newsFeed.url, [makeRaw("https://n/1", title: "News")])
+
+        await service.handleSystemWake()
+
+        XCTAssertNotNil(service.state(for: .ai).lastRefreshDate)
+        XCTAssertNotNil(service.state(for: .earnings).lastRefreshDate)
+        XCTAssertNotNil(service.state(for: .news).lastRefreshDate)
+        XCTAssertEqual(rss.fetchCount, 3)
     }
 
     // MARK: - force regenerate per-cat 隔离

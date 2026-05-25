@@ -11,6 +11,7 @@ struct DigestSectionView: View {
     @State private var isExpanded = true
 
     private var perCatState: CategoryState { refreshService.state(for: category) }
+    private var isCurrentCatSummarizing: Bool { refreshService.isSummarizing(category: category) }
 
     /// 摘要已完成数：DigestEngine 需 ≥3 才生成（数据完整性保护）
     private var summarizedCount: Int {
@@ -62,7 +63,7 @@ struct DigestSectionView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(TextColor.tertiary)
-                    .disabled(perCatState.isRegeneratingDigest || refreshService.isSummarizing)
+                    .disabled(perCatState.isRegeneratingDigest || isCurrentCatSummarizing)
                     .help("重新生成摘要")
                 }
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
@@ -108,7 +109,7 @@ struct DigestSectionView: View {
     /// 右侧状态显示：进行中 → spinner；摘要不足 → 文案；其他 → refresh 按钮
     @ViewBuilder
     private var placeholderTrailing: some View {
-        if perCatState.isRegeneratingDigest || refreshService.isSummarizing {
+        if perCatState.isRegeneratingDigest || isCurrentCatSummarizing {
             ProgressView().scaleEffect(0.55).frame(width: 12, height: 12)
             Text("生成中…")
                 .font(Typography.caption)
@@ -127,7 +128,7 @@ struct DigestSectionView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(TextColor.tertiary)
-            .disabled(perCatState.isRegeneratingDigest || refreshService.isSummarizing)
+            .disabled(perCatState.isRegeneratingDigest || isCurrentCatSummarizing)
             .help("重新生成摘要")
         }
     }

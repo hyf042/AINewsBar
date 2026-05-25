@@ -25,8 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { _ in
             Task { @MainActor in
-                RefreshService.shared.resetCrossedDayStateIfNeeded()
-                await RefreshService.shared.refreshIfNeeded()
+                await RefreshService.shared.handleSystemWake()
             }
         }
     }

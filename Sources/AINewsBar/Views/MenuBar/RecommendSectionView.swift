@@ -9,6 +9,7 @@ struct RecommendSectionView: View {
     @EnvironmentObject private var refreshService: RefreshService
 
     private var perCatState: CategoryState { refreshService.state(for: category) }
+    private var isCurrentCatSummarizing: Bool { refreshService.isSummarizing(category: category) }
 
     private var title: String {
         switch category {
@@ -80,7 +81,7 @@ struct RecommendSectionView: View {
             if perCatState.isRegeneratingRecommend {
                 ProgressView().scaleEffect(0.55).frame(width: 12, height: 12)
                 Text("生成中…").font(Typography.caption).foregroundStyle(TextColor.tertiary)
-            } else if loading && refreshService.isSummarizing {
+            } else if loading && isCurrentCatSummarizing {
                 ProgressView().scaleEffect(0.55).frame(width: 12, height: 12)
                 Text("生成中…").font(Typography.caption).foregroundStyle(TextColor.tertiary)
             } else {
@@ -92,7 +93,7 @@ struct RecommendSectionView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(TextColor.tertiary)
-                .disabled(perCatState.isRegeneratingRecommend || refreshService.isSummarizing)
+                .disabled(perCatState.isRegeneratingRecommend || isCurrentCatSummarizing)
                 .help("重新生成推荐")
             }
         }

@@ -29,6 +29,10 @@ struct DigestEngine {
         )
         // AI 偶尔输出 **bold** / # 标题 等 markdown 噪声，UI 不渲染 markdown 会字面显示
         let content = MarkdownStripper.strip(rawContent)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else {
+            throw BailianError.malformedResponse(reason: "digest 响应为空")
+        }
         Log.write("[Digest][\(category.rawValue)] generated from \(snapshot.summarizedCount) summaries")
         return Outcome(
             content: content,

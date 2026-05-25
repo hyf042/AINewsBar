@@ -64,4 +64,19 @@ final class DigestEngineTests: XCTestCase {
         XCTAssertEqual(outcome?.content, "今日要闻...")
         XCTAssertEqual(outcome?.articleCount, 5)
     }
+
+    func testEmptyDigestAfterStrippingThrows() async {
+        ai.digestProvider = { _ in "   \n  " }
+
+        do {
+            _ = try await engine.run(snapshot: snap(summarized: 5),
+                                     category: .ai,
+                                     apiKey: "k", model: "m")
+            XCTFail("strip 后为空的 digest 不应被持久化为有效摘要")
+        } catch BailianError.malformedResponse(let reason) {
+            XCTAssertTrue(reason.contains("digest 响应为空"))
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
 }

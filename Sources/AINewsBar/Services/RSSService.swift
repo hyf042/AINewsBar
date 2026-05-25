@@ -24,6 +24,8 @@ enum RSSFetchError: Error, LocalizedError {
 actor RSSService: RSSFetching {
     static let shared = RSSService()
 
+    static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 AINewsBar/2.0"
+
     private let session: URLSession
 
     init(timeout: TimeInterval = 10) {
@@ -42,7 +44,11 @@ actor RSSService: RSSFetching {
             throw URLError(.badURL)
         }
 
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/rss+xml, application/atom+xml, application/xml, text/xml, */*", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse,
            !(200...299).contains(http.statusCode) {
             throw RSSFetchError.httpStatus(code: http.statusCode)

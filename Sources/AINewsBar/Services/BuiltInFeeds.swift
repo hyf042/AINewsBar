@@ -52,59 +52,73 @@ enum BuiltInFeeds {
     /// 同步内置源到数据库：删除已失效的内置源（含其文章），添加缺失的新源。
     /// 注意：旧版本升级后 v2 全清重建，syncInto 会注入全部 27 源。
     @MainActor
-    static func syncInto(context: ModelContext) {
+    @discardableResult
+    static func syncInto(context: ModelContext) -> Bool {
         let expectedURLs = Set(all.map(\.url))
         let expectedByURL = Dictionary(uniqueKeysWithValues: all.map { ($0.url, $0) })
-        let existing = context.safeFetch(
-            FetchDescriptor<Feed>(predicate: #Predicate { $0.isBuiltIn == true })
-        )
-
-        // 删除已失效的内置源及其文章
-        let toRemove = existing.filter { !expectedURLs.contains($0.url) }
-        for feed in toRemove {
-            let feedID = feed.id
-            let orphans = context.safeFetch(
-                FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
+        let existing: [Feed]
+        do {
+            existing = try context.safeFetchOrThrow(
+                FetchDescriptor<Feed>(predicate: #Predicate { $0.isBuiltIn == true })
             )
-            orphans.forEach { context.delete($0) }
-            context.delete(feed)
+        } catch {
+            Log.write("[Feeds] sync aborted: built-in feed fetch failed: \(error)")
+            return false
         }
 
-        // URL 稳定但元数据变化时也要同步；Article 冗余了 category/feedTitle，
-        // category 变化时直接删旧文章，避免跨 tab 污染。
-        for feed in existing {
-            guard let expected = expectedByURL[feed.url] else { continue }
-            let categoryChanged = feed.category != expected.category.rawValue
-            let titleChanged = feed.title != expected.title
-            if categoryChanged {
+        do {
+            // 删除已失效的内置源及其文章
+            let toRemove = existing.filter { !expectedURLs.contains($0.url) }
+            for feed in toRemove {
                 let feedID = feed.id
-                let articles = context.safeFetch(
+                let orphans = try context.safeFetchOrThrow(
                     FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
                 )
-                articles.forEach { context.delete($0) }
-                feed.category = expected.category.rawValue
-            } else if titleChanged {
-                let feedID = feed.id
-                let articles = context.safeFetch(
-                    FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
-                )
-                articles.forEach { $0.feedTitle = expected.title }
+                orphans.forEach { context.delete($0) }
+                context.delete(feed)
             }
-            if titleChanged {
-                feed.title = expected.title
+
+            // URL 稳定但元数据变化时也要同步；Article 冗余了 category/feedTitle，
+            // category 变化时直接删旧文章，避免跨 tab 污染。
+            for feed in existing {
+                guard let expected = expectedByURL[feed.url] else { continue }
+                let categoryChanged = feed.category != expected.category.rawValue
+                let titleChanged = feed.title != expected.title
+                if categoryChanged {
+                    let feedID = feed.id
+                    let articles = try context.safeFetchOrThrow(
+                        FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
+                    )
+                    articles.forEach { context.delete($0) }
+                    feed.category = expected.category.rawValue
+                } else if titleChanged {
+                    let feedID = feed.id
+                    let articles = try context.safeFetchOrThrow(
+                        FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
+                    )
+                    articles.forEach { $0.feedTitle = expected.title }
+                }
+                if titleChanged {
+                    feed.title = expected.title
+                }
             }
+
+            // 添加缺失的新源（含 category 信息）
+            let existingURLs = Set(existing.map(\.url))
+            all.filter { !existingURLs.contains($0.url) }
+                .map { entry in
+                    Feed(title: entry.title, url: entry.url,
+                         isBuiltIn: true, category: entry.category)
+                }
+                .forEach { context.insert($0) }
+
+            try context.safeSaveOrThrow()
+            return true
+        } catch {
+            context.rollback()
+            Log.write("[Feeds] sync aborted: \(error)")
+            return false
         }
-
-        // 添加缺失的新源（含 category 信息）
-        let existingURLs = Set(existing.map(\.url))
-        all.filter { !existingURLs.contains($0.url) }
-            .map { entry in
-                Feed(title: entry.title, url: entry.url,
-                     isBuiltIn: true, category: entry.category)
-            }
-            .forEach { context.insert($0) }
-
-        context.safeSave()
     }
 
     /// 容灾去重：按 URL 移除重复文章，保留 publishedAt 最新的一条。

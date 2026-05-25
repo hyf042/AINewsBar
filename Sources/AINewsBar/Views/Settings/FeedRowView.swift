@@ -4,6 +4,8 @@ import SwiftData
 struct FeedRowView: View {
     @Bindable var feed: Feed
     @Environment(\.modelContext) private var modelContext
+    @State private var saveErrorMessage = ""
+    @State private var showSaveErrorAlert = false
     let checkStatus: CheckStatus
     let onCheck: () async -> Void
 
@@ -32,6 +34,11 @@ struct FeedRowView: View {
             checkButton
         }
         .padding(.vertical, 2)
+        .alert("保存失败", isPresented: $showSaveErrorAlert) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(saveErrorMessage)
+        }
     }
 
     private var checkButton: some View {
@@ -55,11 +62,22 @@ struct FeedRowView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)
-                .onChange(of: feed.skipFilter) { _, _ in
-                    modelContext.safeSave()
+                .onChange(of: feed.skipFilter) { oldValue, _ in
+                    saveSkipFilterChange(revertingTo: oldValue)
                 }
         }
         .help("跳过 AI 筛选（纯净源用，省 token；如 Apple Newsroom 100% 都是公司动态可开启）")
+    }
+
+    private func saveSkipFilterChange(revertingTo oldValue: Bool) {
+        do {
+            try modelContext.safeSaveOrThrow()
+        } catch {
+            modelContext.rollback()
+            feed.skipFilter = oldValue
+            saveErrorMessage = error.localizedDescription
+            showSaveErrorAlert = true
+        }
     }
 }
 
@@ -67,6 +85,8 @@ struct BuiltInFeedRowView: View {
     @Bindable var feed: Feed
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var refreshService: RefreshService
+    @State private var saveErrorMessage = ""
+    @State private var showSaveErrorAlert = false
     let checkStatus: CheckStatus
     let onCheck: () async -> Void
 
@@ -99,6 +119,11 @@ struct BuiltInFeedRowView: View {
                 .onChange(of: feed.isEnabled) { _, enabled in handleToggle(enabled: enabled) }
         }
         .padding(.vertical, 2)
+        .alert("保存失败", isPresented: $showSaveErrorAlert) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(saveErrorMessage)
+        }
     }
 
     private var checkButton: some View {
@@ -120,11 +145,22 @@ struct BuiltInFeedRowView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)
-                .onChange(of: feed.skipFilter) { _, _ in
-                    modelContext.safeSave()
+                .onChange(of: feed.skipFilter) { oldValue, _ in
+                    saveSkipFilterChange(revertingTo: oldValue)
                 }
         }
         .help("跳过 AI 筛选（纯净源用，省 token；如 Apple Newsroom 100% 都是公司动态可开启）")
+    }
+
+    private func saveSkipFilterChange(revertingTo oldValue: Bool) {
+        do {
+            try modelContext.safeSaveOrThrow()
+        } catch {
+            modelContext.rollback()
+            feed.skipFilter = oldValue
+            saveErrorMessage = error.localizedDescription
+            showSaveErrorAlert = true
+        }
     }
 
     private func handleToggle(enabled: Bool) {

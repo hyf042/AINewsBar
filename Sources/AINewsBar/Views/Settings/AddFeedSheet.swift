@@ -11,6 +11,8 @@ struct AddFeedSheet: View {
     @State private var selectedCategory: AINewsBar.Category
     @State private var validationStatus: CheckStatus = .idle
     @State private var showForceAddAlert = false
+    @State private var saveErrorMessage = ""
+    @State private var showSaveErrorAlert = false
 
     init(isPresented: Binding<Bool>, defaultCategory: AINewsBar.Category = .ai) {
         self._isPresented = isPresented
@@ -60,6 +62,11 @@ struct AddFeedSheet: View {
             Button("仍要添加") { addFeed() }
         } message: {
             Text("未能从该 URL 获取到文章，可能是地址错误或暂时不可用。是否仍要添加？")
+        }
+        .alert("保存失败", isPresented: $showSaveErrorAlert) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(saveErrorMessage)
         }
     }
 
@@ -112,7 +119,13 @@ struct AddFeedSheet: View {
         let feed = Feed(title: title, url: url,
                         isBuiltIn: false, category: selectedCategory)
         modelContext.insert(feed)
-        modelContext.safeSave()
-        isPresented = false
+        do {
+            try modelContext.safeSaveOrThrow()
+            isPresented = false
+        } catch {
+            modelContext.rollback()
+            saveErrorMessage = error.localizedDescription
+            showSaveErrorAlert = true
+        }
     }
 }

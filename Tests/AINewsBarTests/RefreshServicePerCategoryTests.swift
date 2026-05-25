@@ -2,7 +2,8 @@ import XCTest
 import SwiftData
 @testable import AINewsBar
 
-/// v2-multi-category: 验证 per-cat 状态隔离 + .ai shortcut + force/timer cat 化。
+/// v2-multi-category: 验证 per-cat 状态隔离 + force/timer cat 化。
+/// （shortcut backward compat 测试已删 —— H1 review 后 .ai shortcut properties 已移除）
 @MainActor
 final class RefreshServicePerCategoryTests: XCTestCase {
 
@@ -64,25 +65,14 @@ final class RefreshServicePerCategoryTests: XCTestCase {
         XCTAssertEqual(newsState.aiAvailability, .unknown)
     }
 
-    func testBackwardCompatPropertiesMirrorAICatState() {
-        // service.dailyDigest 等于 state(for: .ai).dailyDigest
-        XCTAssertNil(service.dailyDigest)
-        XCTAssertNil(service.state(for: .ai).dailyDigest)
+    // MARK: - markAvailability 公开 setter
 
-        // Setter 写入 .ai cat
-        service.dailyDigest = "test-ai"
-        XCTAssertEqual(service.state(for: .ai).dailyDigest, "test-ai")
-
-        // 不影响 .earnings / .news
-        XCTAssertNil(service.state(for: .earnings).dailyDigest)
-        XCTAssertNil(service.state(for: .news).dailyDigest)
-    }
-
-    func testBackwardCompatAIAvailabilityMirrorAI() {
-        service.aiAvailability = .available
+    func testMarkAvailabilitySetsOnlyTargetCat() {
+        service.markAvailability(.available, for: .ai)
         XCTAssertEqual(service.state(for: .ai).aiAvailability, .available)
         XCTAssertEqual(service.state(for: .earnings).aiAvailability, .unknown,
-                       "改 .ai 不应动 .earnings")
+                       "markAvailability 应只动目标 cat")
+        XCTAssertEqual(service.state(for: .news).aiAvailability, .unknown)
     }
 
     // MARK: - refresh per-cat 隔离
@@ -189,9 +179,9 @@ final class RefreshServicePerCategoryTests: XCTestCase {
     // MARK: - 跨日重置全 cat 遍历
 
     func testCrossDayResetClearsAllCats() {
-        // 先 set 三 cat 的状态
+        // 先 set 三 cat 的状态（_testMutate 走 mutate 路径触发 @Published 通知）
         for cat in AINewsBar.Category.allCases {
-            service.states[cat]?.dailyDigest = "digest-\(cat.rawValue)"
+            service._testMutate(for: cat) { $0.dailyDigest = "digest-\(cat.rawValue)" }
         }
         XCTAssertNotNil(service.state(for: .ai).dailyDigest)
         XCTAssertNotNil(service.state(for: .earnings).dailyDigest)

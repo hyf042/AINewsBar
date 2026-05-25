@@ -119,10 +119,11 @@ final class RefreshServiceUsageTests: XCTestCase {
 
         await service.refresh()
 
-        if case .unavailable = service.aiAvailability {
+        let availability = service.state(for: .ai).aiAvailability
+        if case .unavailable = availability {
             // pass
         } else {
-            XCTFail("expected .unavailable, got \(service.aiAvailability)")
+            XCTFail("expected .unavailable, got \(availability)")
         }
     }
 

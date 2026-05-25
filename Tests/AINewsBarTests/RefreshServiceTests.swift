@@ -65,7 +65,7 @@ final class RefreshServiceTests: XCTestCase {
         await service.refresh()
 
         XCTAssertEqual(fetchArticles().count, 2)
-        XCTAssertNotNil(service.lastRefreshDate)
+        XCTAssertNotNil(service.state(for: .ai).lastRefreshDate)
     }
 
     // P11: 无 pubDate 的 RawArticle 不入库（避免每天重生脏文章）
@@ -141,8 +141,8 @@ final class RefreshServiceTests: XCTestCase {
         rss.setFailure(feed.url, URLError(.timedOut))
 
         await service.refresh()
-        XCTAssertEqual(service.lastFetchErrorCount, 1)
-        XCTAssertNotNil(service.lastError)
+        XCTAssertEqual(service.state(for: .ai).lastFetchErrorCount, 1)
+        XCTAssertNotNil(service.state(for: .ai).lastError)
     }
 
     // MARK: - AI 不可用
@@ -153,10 +153,11 @@ final class RefreshServiceTests: XCTestCase {
         rss.setSuccess(feed.url, [makeRaw("https://a/1")])
 
         await service.refresh()
-        if case .unavailable = service.aiAvailability {
+        let availability = service.state(for: .ai).aiAvailability
+        if case .unavailable = availability {
             // OK
         } else {
-            XCTFail("aiAvailability 应为 unavailable，实际：\(service.aiAvailability)")
+            XCTFail("aiAvailability 应为 unavailable，实际：\(availability)")
         }
         XCTAssertEqual(ai.summaryCallCount, 0, "无 API Key 时不应调 AI")
     }
@@ -203,8 +204,8 @@ final class RefreshServiceTests: XCTestCase {
 
         XCTAssertEqual(ai.recommendCallCount, 1)
         XCTAssertEqual(ai.digestCallCount, 1)
-        XCTAssertNotNil(service.dailyDigest)
-        XCTAssertEqual(service.recommendedArticleIDs.count, 5)
+        XCTAssertNotNil(service.state(for: .ai).dailyDigest)
+        XCTAssertEqual(service.state(for: .ai).recommendedArticleIDs.count, 5)
     }
 
     func testRefreshSkipsDigestBelow3Articles() async {
@@ -244,7 +245,7 @@ final class RefreshServiceTests: XCTestCase {
     func testForceRegenerateRecommendNoAPIKey() async {
         prefs.apiKey = nil
         await service.forceRegenerateRecommend()
-        if case .unavailable = service.aiAvailability {
+        if case .unavailable = service.state(for: .ai).aiAvailability {
             // OK
         } else {
             XCTFail("应为 unavailable")
@@ -302,7 +303,7 @@ final class RefreshServiceTests: XCTestCase {
 
         await service.refresh()
         // 推荐失败时 aiAvailability 应为 unavailable
-        if case .unavailable = service.aiAvailability {
+        if case .unavailable = service.state(for: .ai).aiAvailability {
             // OK
         } else {
             XCTFail("推荐失败应记录为 unavailable")
@@ -322,7 +323,9 @@ final class RefreshServiceTests: XCTestCase {
                                feedID: feed.id, feedTitle: feed.title))
         try? context.save()
 
-        service.lastRefreshDate = yesterday
+        service._testMutate(for: .ai) { $0.lastRefreshDate = yesterday }
+        // 真跨日：先 set lastResetCheckDate 到非今日，让 shouldClearState=true
+        service.lastResetCheckDate = yesterday
         service.resetCrossedDayStateIfNeeded()
 
         let urls = fetchArticles().map(\.url).sorted()
@@ -333,30 +336,37 @@ final class RefreshServiceTests: XCTestCase {
     // 否则用户打开菜单仍会看到昨天的 digest / 推荐内容直到 refresh 完成
     func testCrossedDayResetClearsUIState() {
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
-        service.lastRefreshDate = yesterday
-        service.dailyDigest = "昨天的摘要"
-        service.recommendedArticleIDs = [UUID(), UUID()]
-        service.lastDigestDate = yesterday
-        service.lastRecommendDate = yesterday
+        service._testMutate(for: .ai) {
+            $0.lastRefreshDate = yesterday
+            $0.dailyDigest = "昨天的摘要"
+            $0.recommendedArticleIDs = [UUID(), UUID()]
+            $0.lastDigestDate = yesterday
+            $0.lastRecommendDate = yesterday
+        }
+        // 模拟真跨日：lastResetCheckDate 是昨天（非首启）
+        service.lastResetCheckDate = yesterday
         prefs.saveDigest(content: "昨天的摘要", date: yesterday, for: .ai)
         prefs.saveDigestArticleCount(5, for: .ai)
         prefs.saveRecommendArticleCount(5, for: .ai)
 
         service.resetCrossedDayStateIfNeeded()
 
-        XCTAssertNil(service.dailyDigest, "@Published dailyDigest 必须被清空")
-        XCTAssertEqual(service.recommendedArticleIDs, [], "推荐 ID 必须被清空")
-        XCTAssertNil(service.lastDigestDate)
-        XCTAssertNil(service.lastRecommendDate)
-        XCTAssertNil(service.lastRefreshDate, "跨日清理后 lastRefreshDate 必须清空，确保 refreshIfNeeded 立即重新抓取")
+        let s = service.state(for: .ai)
+        XCTAssertNil(s.dailyDigest, "@Published dailyDigest 必须被清空")
+        XCTAssertEqual(s.recommendedArticleIDs, [], "推荐 ID 必须被清空")
+        XCTAssertNil(s.lastDigestDate)
+        XCTAssertNil(s.lastRecommendDate)
+        XCTAssertNil(s.lastRefreshDate, "跨日清理后 lastRefreshDate 必须清空，确保 refreshIfNeeded 立即重新抓取")
         XCTAssertNil(prefs.digestContent, "prefs 的 digest 必须被清空")
     }
 
     func testFirstRunResetKeepsTodaysPersistedUIState() {
-        service.dailyDigest = "今天的摘要"
-        service.recommendedArticleIDs = [UUID()]
-        service.lastDigestDate = Date()
-        service.lastRecommendDate = Date()
+        service._testMutate(for: .ai) {
+            $0.dailyDigest = "今天的摘要"
+            $0.recommendedArticleIDs = [UUID()]
+            $0.lastDigestDate = Date()
+            $0.lastRecommendDate = Date()
+        }
         prefs.saveDigest(content: "今天的摘要", date: Date(), for: .ai)
         prefs.saveDigestArticleCount(5, for: .ai)
         prefs.saveRecommendArticleCount(5, for: .ai)
@@ -364,8 +374,9 @@ final class RefreshServiceTests: XCTestCase {
         XCTAssertNil(service.lastResetCheckDate, "模拟同日重启：内存 reset guard 尚未设置")
         service.resetCrossedDayStateIfNeeded()
 
-        XCTAssertEqual(service.dailyDigest, "今天的摘要", "首次 reset 不能清掉今天持久化恢复的摘要")
-        XCTAssertFalse(service.recommendedArticleIDs.isEmpty, "首次 reset 不能清掉今天的推荐")
+        let s = service.state(for: .ai)
+        XCTAssertEqual(s.dailyDigest, "今天的摘要", "首次 reset 不能清掉今天持久化恢复的摘要")
+        XCTAssertFalse(s.recommendedArticleIDs.isEmpty, "首次 reset 不能清掉今天的推荐")
         XCTAssertEqual(prefs.digestContent, "今天的摘要", "首次 reset 不能清掉今天 prefs digest")
         XCTAssertNotNil(service.lastResetCheckDate)
     }
@@ -380,11 +391,11 @@ final class RefreshServiceTests: XCTestCase {
         // 新实现：用 lastResetCheckDate 而非 lastRefreshDate 做 guard
         // 这是修复"裸 refresh() 末尾写 lastRefreshDate 抹掉跨日信号"的关键
         service.lastResetCheckDate = Date()
-        service.dailyDigest = "今天的摘要"
+        service._testMutate(for: .ai) { $0.dailyDigest = "今天的摘要" }
         service.resetCrossedDayStateIfNeeded()
 
         XCTAssertEqual(fetchArticles().map(\.url), ["https://a/old"], "同日不应触发清理")
-        XCTAssertEqual(service.dailyDigest, "今天的摘要", "同日不应清 UI 状态")
+        XCTAssertEqual(service.state(for: .ai).dailyDigest, "今天的摘要", "同日不应清 UI 状态")
     }
 
     /// 首次启动场景：lastResetCheckDate 为 nil 时应触发首次 reset
@@ -410,8 +421,12 @@ final class RefreshServiceTests: XCTestCase {
         rss.setSuccess(feed.url, [makeRaw("https://a/new")])
 
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
-        service.lastRefreshDate = yesterday
-        service.dailyDigest = "昨天的摘要"
+        service._testMutate(for: .ai) {
+            $0.lastRefreshDate = yesterday
+            $0.dailyDigest = "昨天的摘要"
+        }
+        // 模拟真跨日：lastResetCheckDate 是昨天（非首启）
+        service.lastResetCheckDate = yesterday
         prefs.saveDigest(content: "昨天的摘要", date: yesterday, for: .ai)
 
         await service.refreshIfNeeded()

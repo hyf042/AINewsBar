@@ -130,11 +130,14 @@ struct APISettingsView: View {
         do {
             try await BailianService.shared.testConnection(apiKey: apiKey, model: effectiveModel)
             checkStatus = .success(1)
+            // testConnection 成功是全局信号：清 global error。
+            // per-cat aiAvailability 不在此 set —— 旧实现只动 .ai 一个 cat 漏了
+            // earnings/news；正确语义是由下次各 cat 自己的 refresh 自然修正。
             refreshService.globalAIError = nil
-            refreshService.aiAvailability = .available
         } catch {
             checkStatus = .failure(error.localizedDescription)
-            refreshService.aiAvailability = .unavailable(error.localizedDescription)
+            // 同上：API Key/Model 失败已由 401/403 走 globalAIError 映射；
+            // 这里不显式 set per-cat aiAvailability 避免只覆盖一个 cat 的不一致。
         }
     }
 }

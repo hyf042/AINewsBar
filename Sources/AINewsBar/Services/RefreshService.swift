@@ -35,8 +35,9 @@ struct CategoryState: Sendable {
 }
 
 /// 编排者（Facade）：聚合 @Published UI 状态、调度 RSS / Pipeline / Engine / FilterPipeline、原子提交持久化
-/// v2-multi-category: 内部状态全 per-cat（states dict）；旧 `service.dailyDigest` 等 API 保留作为 .ai cat
-/// 的测试便捷入口；生产 UI 应优先使用 `state(for:)`。
+/// v2-multi-category: 状态全 per-cat（states dict）。生产 UI 一律走 `state(for:)`；
+/// 改 state 走 `mutate(_:_:)`（内部）或 `markAvailability(_:for:)`（公开）；
+/// 测试走 `_testMutate(for:_:)`（DEBUG-only）。
 @MainActor
 final class RefreshService: ObservableObject {
     /// 单例。两套机制并存：
@@ -47,10 +48,9 @@ final class RefreshService: ObservableObject {
 
     // MARK: - Published state (v2: per-cat dict + global flags)
 
-    /// per-cat 状态字典。任何 cat 内字段变化都触发 @Published 通知（SwiftUI view 自动重渲染）。
-    /// setter internal 而非 private —— 测试通过 @testable import 直接 set state；
-    /// 生产代码应走 mutate(_:_:) helper，不直接改 dict。
-    @Published var states: [AINewsBar.Category: CategoryState] =
+    /// per-cat 状态字典。setter 私有：任何外部修改必须走 `mutate` / `markAvailability`
+    /// / `_testMutate`（DEBUG），杜绝绕过单一变更点直接改 dict 的可能。
+    @Published private(set) var states: [AINewsBar.Category: CategoryState] =
         Dictionary(uniqueKeysWithValues: AINewsBar.Category.allCases.map { ($0, CategoryState()) })
 
     /// 摘要 pipeline 是否在跑（全局兼容 flag）。UI 新代码优先使用
@@ -65,49 +65,6 @@ final class RefreshService: ObservableObject {
     /// 与 lastRefreshDate 分离：旧实现复用 lastRefreshDate 做跨日判断会被 refresh() 末尾抹掉信号。
     var lastResetCheckDate: Date?
 
-    // MARK: - .ai cat shortcut properties
-    //
-    // 测试可通过 `service.dailyDigest` / `service.aiAvailability` 等访问 .ai cat，
-    // computed property 读写 states[.ai]。
-    // 写入通过 mutate(.ai)；setter 与 states[.ai] 等价。
-    // 生产 UI 直接读 service.state(for: cat)，避免多分类路径误落 .ai。
-
-    var dailyDigest: String? {
-        get { states[.ai]?.dailyDigest }
-        set { mutate(.ai) { $0.dailyDigest = newValue } }
-    }
-    var recommendedArticleIDs: [UUID] {
-        get { states[.ai]?.recommendedArticleIDs ?? [] }
-        set { mutate(.ai) { $0.recommendedArticleIDs = newValue } }
-    }
-    var aiAvailability: AIAvailability {
-        get { states[.ai]?.aiAvailability ?? .unknown }
-        set { mutate(.ai) { $0.aiAvailability = newValue } }
-    }
-    var lastDigestDate: Date? {
-        get { states[.ai]?.lastDigestDate }
-        set { mutate(.ai) { $0.lastDigestDate = newValue } }
-    }
-    var lastRecommendDate: Date? {
-        get { states[.ai]?.lastRecommendDate }
-        set { mutate(.ai) { $0.lastRecommendDate = newValue } }
-    }
-    var lastRefreshDate: Date? {
-        get { states[.ai]?.lastRefreshDate }
-        set { mutate(.ai) { $0.lastRefreshDate = newValue } }
-    }
-    var lastError: String? {
-        get { states[.ai]?.lastError }
-        set { mutate(.ai) { $0.lastError = newValue } }
-    }
-    var lastFetchErrorCount: Int {
-        get { states[.ai]?.lastFetchErrorCount ?? 0 }
-        set { mutate(.ai) { $0.lastFetchErrorCount = newValue } }
-    }
-    var isRefreshing: Bool { states[.ai]?.isRefreshing ?? false }
-    var isRegeneratingRecommend: Bool { states[.ai]?.isRegeneratingRecommend ?? false }
-    var isRegeneratingDigest: Bool { states[.ai]?.isRegeneratingDigest ?? false }
-
     // MARK: - State accessors (v2 推荐 API)
 
     func state(for cat: AINewsBar.Category) -> CategoryState {
@@ -118,11 +75,25 @@ final class RefreshService: ObservableObject {
         activeSummaryPipelineCats.contains(cat)
     }
 
+    /// 公开 setter：让 View 标记 per-cat AI 可用性（API Key 测试成功/失败等场景）。
+    /// 仅暴露 aiAvailability 这一个字段，其他字段一律走内部 mutate。
+    func markAvailability(_ availability: AIAvailability, for cat: AINewsBar.Category) {
+        mutate(cat) { $0.aiAvailability = availability }
+    }
+
     private func mutate(_ cat: AINewsBar.Category, _ block: (inout CategoryState) -> Void) {
         var state = states[cat] ?? CategoryState()
         block(&state)
         states[cat] = state
     }
+
+    #if DEBUG
+    /// 测试专用：用 closure 修改指定 cat 的 state，走 mutate 路径保证 @Published 通知触发。
+    /// 不让测试直接 set states[cat] —— 单一变更点（mutate）也是 SwiftUI 订阅的唯一信号源。
+    func _testMutate(for cat: AINewsBar.Category, _ block: (inout CategoryState) -> Void) {
+        mutate(cat, block)
+    }
+    #endif
 
     // MARK: - Dependencies (注入)
 
@@ -205,7 +176,7 @@ final class RefreshService: ObservableObject {
 
     /// 后台启动入口（AppDelegate 调用）。
     /// v2: 首启 (firstLaunchAfterSchemaUpgrade=true) 仅刷新 AI cat（首屏 27 源全抓体验差）；
-    /// 后续走 refreshAllCatsSequentially 顺序遍历三 cat。
+    /// 后续走 refreshAllCatsConcurrently 三 cat 并发。
     func launchBackgroundRefreshIfNeeded() {
         let isFirstLaunch = UserDefaults.standard.bool(forKey: "firstLaunchAfterSchemaUpgrade")
         if isFirstLaunch {
@@ -216,28 +187,35 @@ final class RefreshService: ObservableObject {
             }
         } else {
             Task { @MainActor [weak self] in
-                await self?.refreshAllCatsSequentially()
+                await self?.refreshAllCatsConcurrently()
             }
         }
     }
 
-    /// 系统从睡眠唤醒后的兜底入口：先做跨日重置，再按 cat 顺序检查刷新。
+    /// 系统从睡眠唤醒后的兜底入口：先做跨日重置，再并发触发三 cat 刷新。
     /// 这是后台自动刷新语义，仍尊重 per-cat auto-refresh 开关。
     func handleSystemWake() async {
         resetCrossedDayStateIfNeeded()
-        await refreshAllCatsSequentially()
+        await refreshAllCatsConcurrently()
     }
 
-    /// 三 cat 顺序刷新（timer fire 与首启非首次都走此路径，避免 token QPS 峰值）。
+    /// 三 cat 并发刷新（timer fire / 首启非首次 / 系统唤醒 三个入口走此路径）。
+    /// QPS 评估：每 cat 内部 5 并发 summary，峰值 3×5=15，DashScope 30 QPS 上限内安全。
+    /// 并发优势：冷启动从串行 1-2 分钟降到 ~30 秒（取决于最慢的 cat）。
     /// v2.1: 跳过 `prefs.loadAutoRefreshEnabled(for:) == false` 的 cat 省 token。
     /// force refresh / lazy first-tab-switch / 手动 refresh 不走此路径，不受开关影响。
-    private func refreshAllCatsSequentially() async {
-        for cat in AINewsBar.Category.allCases {
-            guard prefs.loadAutoRefreshEnabled(for: cat) else {
-                Log.write("[Refresh][\(cat.rawValue)] auto-refresh disabled, skip")
-                continue
+    /// 同 cat 不会双发：refresh(_:) 内部 refreshTasks inflight 复用机制保证幂等。
+    private func refreshAllCatsConcurrently() async {
+        await withTaskGroup(of: Void.self) { group in
+            for cat in AINewsBar.Category.allCases {
+                guard prefs.loadAutoRefreshEnabled(for: cat) else {
+                    Log.write("[Refresh][\(cat.rawValue)] auto-refresh disabled, skip")
+                    continue
+                }
+                group.addTask { @MainActor [weak self] in
+                    await self?.refreshIfNeeded(cat)
+                }
             }
-            await refreshIfNeeded(cat)
         }
     }
 
@@ -648,7 +626,10 @@ final class RefreshService: ObservableObject {
         // 注意：不重置 aiAvailability —— Recommend 设的 .unavailable 应保留
     }
 
-    /// 摘要原子持久化：safeSaveOrThrow 失败回滚内存 + 设 .unavailable + token 记 success=false。
+    /// 摘要原子持久化：safeSaveOrThrow 失败用 context.rollback() 撤回内存改动 +
+    /// 设 .unavailable + token 记 success=false。
+    /// 不再手动 fetch+nil+save"舞蹈"——SwiftData rollback 把内存改动回滚到 last save，
+    /// 保证内存/磁盘一致；手动 set nil 再 save 失败可能导致两层永久错位。
     private func commitSummaries(
         cat: AINewsBar.Category, result: SummaryPipeline.Result, model: String,
         context: ModelContext
@@ -667,14 +648,9 @@ final class RefreshService: ObservableObject {
                 }
                 try context.safeSaveOrThrow()
             } catch {
-                if let alive = try? context.safeFetchOrThrow(
-                    FetchDescriptor<Article>(predicate: #Predicate { ids.contains($0.id) })
-                ) {
-                    for article in alive where map[article.id] != nil { article.aiSummary = nil }
-                    _ = context.safeSave()
-                }
+                context.rollback()
                 mutate(cat) { $0.aiAvailability = .unavailable("摘要保存失败") }
-                Log.write("[Summary][\(cat.rawValue)] commit failed: \(error)")
+                Log.write("[Summary][\(cat.rawValue)] commit failed, rolled back: \(error)")
                 persistSucceeded = false
             }
         }
@@ -793,7 +769,7 @@ final class RefreshService: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.resetCrossedDayStateIfNeeded()
-                await self?.refreshAllCatsSequentially()
+                await self?.refreshAllCatsConcurrently()
             }
         }
     }
@@ -817,19 +793,13 @@ final class RefreshService: ObservableObject {
         let startOfToday = Calendar.current.startOfDay(for: Date())
         cleanupOldArticles(context: context, before: startOfToday)
 
-        let shouldClearState: Bool
-        if let last = lastResetCheckDate {
-            shouldClearState = !Calendar.current.isDateInToday(last)
-        } else {
-            // 首次启动没有 lastResetCheckDate：只清旧文章，避免同日重启把今天的
-            // persisted digest/recommend 清掉。若内存状态明确来自昨天，则仍按跨日清理。
-            shouldClearState = AINewsBar.Category.allCases.contains { cat in
-                let s = state(for: cat)
-                return [s.lastRefreshDate, s.lastDigestDate, s.lastRecommendDate]
-                    .compactMap { $0 }
-                    .contains { !Calendar.current.isDateInToday($0) }
-            }
-        }
+        // 走到这里说明：lastResetCheckDate 要么 nil（首启），要么非今日（真跨日）。
+        // 首启 case：loadPersistedState 已把"非今日 prefs"清掉，内存里 lastRefreshDate
+        // 等字段要么是今日要么是 nil，复检内存状态永远 false 故无意义。
+        // 真跨日 case：必清状态。直接以 lastResetCheckDate != nil 区分：
+        //   - nil（首启）：只清磁盘旧文章 + set lastResetCheckDate；不动 prefs/UI 状态
+        //   - 非 nil 且非今日（真跨日）：全清
+        let shouldClearState = (lastResetCheckDate != nil)
 
         if shouldClearState {
             for cat in AINewsBar.Category.allCases {

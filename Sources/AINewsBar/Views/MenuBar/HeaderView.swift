@@ -11,7 +11,7 @@ struct HeaderView: View {
 
     private var title: String {
         switch category {
-        case .ai:        return "AI 资讯"
+        case .ai:        return "AI"
         case .earnings:  return "财报"
         case .news:      return "新闻"
         }

@@ -3,24 +3,28 @@ import SwiftData
 
 /// v2-multi-category: 顶部 segmented 切 tab + per-tab 未读 badge。
 ///
-/// 每 tab 独立 @Query count 未读数。@Query 谓词在 init 时捕获，
-/// 3 个 cat 各 1 个 @Query 是确定性写法（vs 动态 predicate 不可靠）。
+/// 不用系统 Picker(.segmented)：macOS 实现按内容宽度，3 个 tab 无法等分撑满。
+/// 自定义 HStack 3 个 Button 等宽撑满 popover 宽度。
+///
+/// 每 tab 独立 @Query count 未读数 (3 个 @Query 静态谓词)。
 struct CategoryTabBar: View {
     @Binding var selectedTab: AINewsBar.Category
 
-    @Query(filter: #Predicate<Article> { $0.isRead == false && $0.category == "ai" })
-    private var aiUnread: [Article]
-    @Query(filter: #Predicate<Article> { $0.isRead == false && $0.category == "earnings" })
-    private var earningsUnread: [Article]
-    @Query(filter: #Predicate<Article> { $0.isRead == false && $0.category == "news" })
-    private var newsUnread: [Article]
+    @Query(filter: #Predicate<Article> { $0.category == "ai" })
+    private var aiArticles: [Article]
+    @Query(filter: #Predicate<Article> { $0.category == "earnings" })
+    private var earningsArticles: [Article]
+    @Query(filter: #Predicate<Article> { $0.category == "news" })
+    private var newsArticles: [Article]
 
     private func unreadCount(for cat: AINewsBar.Category) -> Int {
+        let source: [Article]
         switch cat {
-        case .ai:        return aiUnread.count
-        case .earnings:  return earningsUnread.count
-        case .news:      return newsUnread.count
+        case .ai:        source = aiArticles
+        case .earnings:  source = earningsArticles
+        case .news:      source = newsArticles
         }
+        return source.filter { !$0.isRead && $0.accepted == true }.count
     }
 
     private func label(for cat: AINewsBar.Category) -> String {
@@ -29,14 +33,43 @@ struct CategoryTabBar: View {
     }
 
     var body: some View {
-        Picker("", selection: $selectedTab) {
+        HStack(spacing: 4) {
             ForEach(AINewsBar.Category.allCases, id: \.self) { cat in
-                Text(label(for: cat)).tag(cat)
+                tabButton(for: cat)
             }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(4)
+        .background(BrandColor.surfaceMuted)
+    }
+
+    private func tabButton(for cat: AINewsBar.Category) -> some View {
+        let isSelected = (cat == selectedTab)
+        return Button {
+            withAnimation(.easeInOut(duration: 0.12)) { selectedTab = cat }
+        } label: {
+            Text(label(for: cat))
+                .font(Typography.body)
+                .fontWeight(isSelected ? .semibold : .regular)
+                .foregroundStyle(isSelected ? AnyShapeStyle(TextColor.primary) : AnyShapeStyle(TextColor.secondary))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        // unemphasizedSelectedContentBackgroundColor: macOS native segmented
+                        // selected 色 — 亮模式接近白，暗模式中灰 (≈#3A3A3C)，与 surfaceMuted
+                        // 父背景对比强；vs controlBackgroundColor 暗模式与 surfaceMuted 太接近
+                        .fill(isSelected ? AnyShapeStyle(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
+                                         : AnyShapeStyle(Color.clear))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(isSelected ? Color.primary.opacity(0.15) : Color.clear,
+                                        lineWidth: 0.5)
+                        )
+                        .shadow(color: isSelected ? .black.opacity(0.12) : .clear,
+                                radius: 1.5, y: 0.5)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

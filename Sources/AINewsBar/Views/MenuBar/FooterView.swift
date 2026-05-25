@@ -43,15 +43,17 @@ struct FooterView: View {
             }
             Spacer()
             if perCatState.lastFetchErrorCount > 0 {
+                // v2: 点击直接重试当前 cat（启动期网络未就绪是常见 race，让用户一键验证）
                 Button {
-                    NSApp.activate(ignoringOtherApps: true)
-                    openSettings()
+                    Task { await refreshService.refresh(category) }
                 } label: {
-                    Text("⚠ \(perCatState.lastFetchErrorCount) 个源失败")
+                    Text("⚠ 上次 \(perCatState.lastFetchErrorCount) 源失败 · 点击重试")
                         .font(Typography.caption)
                         .foregroundStyle(BrandColor.accent)
                 }
                 .buttonStyle(.plain)
+                .disabled(perCatState.isRefreshing)
+                .help("启动期网络问题常见。点击重新抓取该 tab；如仍失败再去设置查具体源")
             }
             Button {
                 NSApp.activate(ignoringOtherApps: true)

@@ -235,12 +235,14 @@ final class RefreshService: ObservableObject {
         await refreshIfNeeded(.ai)
     }
 
-    /// v2: 全局未读计数（三 cat 累加）。menu bar 图标 badge 显示此值。
-    /// per-cat badge（如 "AI (3)"）由 view 层 @Query 独立 count。
+    /// v2: 全局未读计数（三 cat 累加，仅算 accepted=true）。menu bar 图标 badge 显示此值。
+    /// per-cat badge（如 "AI (3)"）由 CategoryTabBar 内 @Query 独立 count。
+    /// 必须 filter accepted=true：filter 拒绝/待筛的文章不应计入 (财报/新闻 cat 否则 badge 虚高)。
     func postUnreadCount(context: ModelContext) {
-        let count = context.safeFetchCount(
+        let articles = context.safeFetch(
             FetchDescriptor<Article>(predicate: #Predicate { $0.isRead == false })
         )
+        let count = articles.filter { $0.accepted == true }.count
         NotificationCenter.default.post(name: .unreadCountChanged, object: count)
     }
 

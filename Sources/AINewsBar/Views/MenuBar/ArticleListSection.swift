@@ -24,11 +24,13 @@ struct ArticleListSection: View {
         }
     }
 
-    /// 与 MenuBarView 原 listHeight 算法保持一致（实现迁移，行为不变）
+    /// 单行高度估算 80pt：兼顾长标题 2 行 + 摘要 1 行 + padding（v2 修复，旧 52pt 会让长标题被截）。
+    /// max 400pt：上限平衡 — 新闻 84 篇等大量文章避免 popover 总高度溢出 16 寸 MBP 屏幕；
+    /// 文章超量时 List 内 scroll 而非 popover 撑高。AI 少文章 (≤4) 不触 max 自然贴合。
     private var listHeight: CGFloat {
-        let rowHeight: CGFloat = 52
+        let rowHeight: CGFloat = 80
         let separatorHeight: CGFloat = readArticles.isEmpty ? 0 : 28
-        return min(max(CGFloat(totalCount) * rowHeight + separatorHeight, 120), 460)
+        return min(max(CGFloat(totalCount) * rowHeight + separatorHeight, 120), 400)
     }
 
     /// 5 状态副文案（风格 A：" · " 分隔）
@@ -137,7 +139,7 @@ struct ArticleListSection: View {
     private var loadingState: some View {
         VStack(spacing: 8) {
             ProgressView()
-            Text("正在获取资讯…")
+            Text("正在获取…")
                 .foregroundStyle(TextColor.secondary)
                 .font(Typography.caption)
         }

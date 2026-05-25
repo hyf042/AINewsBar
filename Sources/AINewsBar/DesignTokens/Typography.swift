@@ -8,7 +8,7 @@ import SwiftUI
 /// 唯一例外：ArticleRowView 标题因 `ArticleListSection.listHeight = 52` 写死，
 /// 使用 fixed `Font.system(size: 13)`，不走此 token。详见 spec v3 修订 0.1-1。
 enum Typography {
-    /// HeaderView 顶部 hero（"AI 资讯 [n/N]"）。
+    /// HeaderView 顶部 hero（如 "AI [n/N]" / "财报 [n/N]" / "新闻 [n/N]"）。
     /// macOS 默认 ~13pt **bold**（注意：是 bold 不是 semibold，与 titleEmphasized 字重差 1 档）。
     /// 字重差异是 "hero 强调" 的语义信号，刻意保留。
     static let headline = Font.headline

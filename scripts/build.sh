@@ -2,9 +2,9 @@
 set -euo pipefail
 
 VERSION="1.0.0"
-APP_NAME="AINewsBar"
-DISPLAY_NAME="AI NewsBar"
-BUNDLE_ID="com.ainewsbar.app"
+APP_NAME="AINewsBar"             # binary 文件名 / Bundle 路径（与 Package.swift target 一致，不改）
+DISPLAY_NAME="资讯助手"            # 用户可见名（CFBundleName + CFBundleDisplayName 共用）
+BUNDLE_ID="com.ainewsbar.app"    # Bundle ID 保留 — 改了 UserDefaults domain 会变导致 API Key 丢失
 MIN_MACOS="14.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,7 +39,7 @@ cat > "$INFO_PLIST" <<EOF
     <key>CFBundleIdentifier</key>
     <string>${BUNDLE_ID}</string>
     <key>CFBundleName</key>
-    <string>${APP_NAME}</string>
+    <string>${DISPLAY_NAME}</string>
     <key>CFBundleDisplayName</key>
     <string>${DISPLAY_NAME}</string>
     <key>CFBundleVersion</key>

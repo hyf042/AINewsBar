@@ -46,11 +46,16 @@ struct FeedRowView: View {
     /// 跳过 AI 筛选 toggle。开启后该源新入库文章 accepted 直接 true，不跑 filter（省 token）。
     /// 用户应在 30 天用量观察后手动标"纯净源"（如 Apple Newsroom 这种 100% 通过率源）。
     private var skipFilterToggle: some View {
-        Toggle("", isOn: $feed.skipFilter)
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .help("跳过 AI 筛选（纯净源用，省 token）")
+        HStack(spacing: 4) {
+            Text("跳过筛选")
+                .font(Typography.caption)
+                .foregroundStyle(TextColor.tertiary)
+            Toggle("", isOn: $feed.skipFilter)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+        }
+        .help("跳过 AI 筛选（纯净源用，省 token；如 Apple Newsroom 100% 都是公司动态可开启）")
     }
 }
 
@@ -103,11 +108,16 @@ struct BuiltInFeedRowView: View {
     }
 
     private var skipFilterToggle: some View {
-        Toggle("", isOn: $feed.skipFilter)
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .help("跳过 AI 筛选（纯净源用，省 token）")
+        HStack(spacing: 4) {
+            Text("跳过筛选")
+                .font(Typography.caption)
+                .foregroundStyle(TextColor.tertiary)
+            Toggle("", isOn: $feed.skipFilter)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+        }
+        .help("跳过 AI 筛选（纯净源用，省 token；如 Apple Newsroom 100% 都是公司动态可开启）")
     }
 
     private func handleToggle(enabled: Bool) {

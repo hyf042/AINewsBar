@@ -62,7 +62,9 @@ struct MenuBarView: View {
             CategoryTabBar(selectedTab: $selectedTab)
             Divider()
             bannerContent
-            DigestSectionView(category: selectedTab)
+            DigestSectionView(category: selectedTab,
+                              articles: currentUnread + currentRead)
+                .id(selectedTab)  // cat 切换时重建，重置 @State isExpanded
             Divider()
             RecommendSectionView(category: selectedTab,
                                  articles: currentUnread + currentRead,
@@ -72,6 +74,7 @@ struct MenuBarView: View {
                                unreadArticles: currentUnread,
                                readArticles: currentRead,
                                onOpen: openArticle)
+                .id(selectedTab)  // cat 切换时重建，重置 @State isExpanded（默认折叠）
             Divider()
             FooterView(category: selectedTab)
         }

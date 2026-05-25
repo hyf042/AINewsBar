@@ -29,18 +29,38 @@ struct RecommendSectionView: View {
         return ids.compactMap { byID[$0] }
     }
 
+    /// RecommendEngine 阈值：候选 < 5 不生成
+    private static let recommendThreshold = 5
+
     var body: some View {
         let loading = picks.isEmpty
+        let candidateShort = articles.count < Self.recommendThreshold
         VStack(alignment: .leading, spacing: 0) {
             header(loading: loading)
             if loading {
-                placeholderRows
+                if candidateShort {
+                    candidateShortFootnote
+                } else {
+                    placeholderRows
+                }
             } else {
                 pickRows
             }
         }
         .padding(.bottom, 4)
         .background(BrandColor.surfaceMuted)
+    }
+
+    /// 候选不足时显示文案而非 5 个占位条（避免永远 placeholder 像 bug）
+    private var candidateShortFootnote: some View {
+        HStack {
+            Text("候选不足，需 ≥\(Self.recommendThreshold) 篇文章 (当前 \(articles.count))")
+                .font(Typography.caption)
+                .foregroundStyle(TextColor.tertiary)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
     }
 
     private func header(loading: Bool) -> some View {

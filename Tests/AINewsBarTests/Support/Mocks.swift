@@ -39,6 +39,9 @@ final class MockAI: AISummarizing, @unchecked Sendable {
     var digestUsage: UsageInfo = .zero
     var classifyUsage: UsageInfo = .zero
 
+    // 并发状态测试用：按 cat 注入摘要延迟，模拟一个 tab 先结束、另一个仍在跑。
+    var summaryDelayByCategoryNanos: [AINewsBar.Category: UInt64] = [:]
+
     // 错误注入
     var summaryError: Error?
     var recommendError: Error?
@@ -72,6 +75,9 @@ final class MockAI: AISummarizing, @unchecked Sendable {
         countLock.withLock {
             _summaryCallCount += 1
             _capturedSummaryCats.append(category)
+        }
+        if let delay = summaryDelayByCategoryNanos[category], delay > 0 {
+            try? await _Concurrency.Task.sleep(nanoseconds: delay)
         }
         if let e = summaryError { throw e }
         let text = summaryProvider?(title, content) ?? "mock-summary-of-\(title)"

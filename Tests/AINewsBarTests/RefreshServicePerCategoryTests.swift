@@ -112,6 +112,28 @@ final class RefreshServicePerCategoryTests: XCTestCase {
         XCTAssertEqual(earningsArticles.count, 0, "仅 refresh AI 不应抓 earnings")
     }
 
+    func testGlobalSummarizingFlagStaysTrueUntilAllConcurrentCatsFinish() async {
+        prefs.apiKey = "test-key"
+        let aiFeed = seedFeed("https://ai.com/feed", title: "AI Feed", category: .ai)
+        let newsFeed = seedFeed("https://news.com/feed", title: "News Feed", category: .news)
+        rss.setSuccess(aiFeed.url, [makeRaw("https://a/1", title: "AI")])
+        rss.setSuccess(newsFeed.url, [makeRaw("https://n/1", title: "News")])
+        ai.summaryDelayByCategoryNanos = [
+            .ai: 40_000_000,
+            .news: 180_000_000,
+        ]
+
+        async let aiRefresh: Void = service.refresh(.ai)
+        async let newsRefresh: Void = service.refresh(.news)
+
+        try? await _Concurrency.Task.sleep(nanoseconds: 90_000_000)
+        XCTAssertTrue(service.isSummarizing,
+                      "AI cat 结束但 news cat 仍在摘要时，全局 summarizing flag 不能提前变 false")
+
+        _ = await (aiRefresh, newsRefresh)
+        XCTAssertFalse(service.isSummarizing)
+    }
+
     // MARK: - force regenerate per-cat 隔离
 
     func testForceRegenerateRecommendOnlyForRequestedCat() async {

@@ -130,6 +130,7 @@ struct APISettingsView: View {
         do {
             try await BailianService.shared.testConnection(apiKey: apiKey, model: effectiveModel)
             checkStatus = .success(1)
+            refreshService.globalAIError = nil
             refreshService.aiAvailability = .available
         } catch {
             checkStatus = .failure(error.localizedDescription)

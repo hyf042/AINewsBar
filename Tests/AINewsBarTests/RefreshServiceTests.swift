@@ -348,7 +348,26 @@ final class RefreshServiceTests: XCTestCase {
         XCTAssertEqual(service.recommendedArticleIDs, [], "推荐 ID 必须被清空")
         XCTAssertNil(service.lastDigestDate)
         XCTAssertNil(service.lastRecommendDate)
+        XCTAssertNil(service.lastRefreshDate, "跨日清理后 lastRefreshDate 必须清空，确保 refreshIfNeeded 立即重新抓取")
         XCTAssertNil(prefs.digestContent, "prefs 的 digest 必须被清空")
+    }
+
+    func testFirstRunResetKeepsTodaysPersistedUIState() {
+        service.dailyDigest = "今天的摘要"
+        service.recommendedArticleIDs = [UUID()]
+        service.lastDigestDate = Date()
+        service.lastRecommendDate = Date()
+        prefs.saveDigest(content: "今天的摘要", date: Date())
+        prefs.saveDigestArticleCount(5)
+        prefs.saveRecommendArticleCount(5)
+
+        XCTAssertNil(service.lastResetCheckDate, "模拟同日重启：内存 reset guard 尚未设置")
+        service.resetCrossedDayStateIfNeeded()
+
+        XCTAssertEqual(service.dailyDigest, "今天的摘要", "首次 reset 不能清掉今天持久化恢复的摘要")
+        XCTAssertFalse(service.recommendedArticleIDs.isEmpty, "首次 reset 不能清掉今天的推荐")
+        XCTAssertEqual(prefs.digestContent, "今天的摘要", "首次 reset 不能清掉今天 prefs digest")
+        XCTAssertNotNil(service.lastResetCheckDate)
     }
 
     func testCrossedDayResetNoopWhenLastResetIsToday() {

@@ -157,6 +157,10 @@ final class RefreshService: ObservableObject {
     /// force* 入口也 await 同 cat 的 task 完成，避免 auto+force 并发 commit 互相覆盖
     private var refreshTasks: [AINewsBar.Category: Task<Void, Never>] = [:]
 
+    /// 正在运行摘要 pipeline 的 cat 数。`isSummarizing` 是公开 UI flag，
+    /// 但 v2 允许 cross-cat refresh 并发，不能让先结束的 cat 把全局 Bool 提前清掉。
+    private var activeSummaryPipelineCount = 0
+
     // MARK: - Init
 
     init(
@@ -190,6 +194,8 @@ final class RefreshService: ObservableObject {
         timer = nil
         for (_, task) in refreshTasks { task.cancel() }
         refreshTasks.removeAll()
+        activeSummaryPipelineCount = 0
+        isSummarizing = false
         configured = false
     }
 
@@ -307,7 +313,10 @@ final class RefreshService: ObservableObject {
 
         if !newArticles.isEmpty {
             newArticles.forEach { context.insert($0) }
-            context.safeSave()
+            guard context.safeSave() else {
+                mutate(cat) { $0.lastError = "数据库保存失败，跳过本次刷新" }
+                return
+            }
         }
 
         mutate(cat) {
@@ -364,11 +373,20 @@ final class RefreshService: ObservableObject {
         let failedSet = Set(result.failedIds)
         let allIds = Array(acceptedSet) + Array(rejectedSet) + Array(failedSet)
 
-        if !allIds.isEmpty,
-           let alive = try? context.safeFetchOrThrow(
-               FetchDescriptor<Article>(predicate: #Predicate { allIds.contains($0.id) })
-           )
-        {
+        var persistSucceeded = true
+        if !allIds.isEmpty {
+            let alive: [Article]
+            do {
+                alive = try context.safeFetchOrThrow(
+                    FetchDescriptor<Article>(predicate: #Predicate { allIds.contains($0.id) })
+                )
+            } catch {
+                mutate(cat) { $0.lastError = "数据库查询失败，跳过筛选结果保存" }
+                Log.write("[Filter][\(catRaw)] refetch alive articles failed: \(error)")
+                persistSucceeded = false
+                alive = []
+            }
+
             for article in alive {
                 if acceptedSet.contains(article.id) {
                     article.accepted = true
@@ -382,12 +400,21 @@ final class RefreshService: ObservableObject {
                     }
                 }
             }
-            _ = context.safeSave()
+            if persistSucceeded {
+                do {
+                    try context.safeSaveOrThrow()
+                } catch {
+                    mutate(cat) { $0.lastError = "筛选结果保存失败" }
+                    Log.write("[Filter][\(catRaw)] save failed: \(error)")
+                    persistSucceeded = false
+                }
+            }
         }
 
         // Token usage: accepted + rejected 都有 usage；failed 不记 token 但记失败次数
         for usageInfo in result.usages {
-            usage?.record(scene: .filter, category: cat, model: model, info: usageInfo)
+            usage?.record(scene: .filter, category: cat, model: model,
+                          info: usageInfo, success: persistSucceeded)
         }
         for _ in result.failedIds {
             usage?.recordFailure(scene: .filter, category: cat, model: model)
@@ -470,9 +497,9 @@ final class RefreshService: ObservableObject {
         if pendingTasks.isEmpty {
             coverage = true
         } else {
-            isSummarizing = true
+            beginSummaryPipeline()
             let result = await summaryPipeline.run(tasks: pendingTasks, apiKey: apiKey, model: model)
-            isSummarizing = false
+            endSummaryPipeline()
             commitSummaries(cat: cat, result: result, model: model, context: context)
             coverage = result.completionRate >= coverageThreshold
             if !coverage && !result.failedIds.isEmpty {
@@ -714,31 +741,58 @@ final class RefreshService: ObservableObject {
         }
     }
 
+    private func beginSummaryPipeline() {
+        activeSummaryPipelineCount += 1
+        isSummarizing = true
+    }
+
+    private func endSummaryPipeline() {
+        activeSummaryPipelineCount = max(0, activeSummaryPipelineCount - 1)
+        isSummarizing = activeSummaryPipelineCount > 0
+    }
+
     /// 跨日全 cat 重置：lastResetCheckDate 不在今天时执行。
     /// 调用点：refresh / forceRegenerate* / refreshIfNeeded / timer / NSWorkspace 唤醒。幂等。
     func resetCrossedDayStateIfNeeded() {
-        let last = lastResetCheckDate ?? .distantPast
-        guard !Calendar.current.isDateInToday(last),
-              let context = modelContext else { return }
+        guard let context = modelContext else { return }
+        if let last = lastResetCheckDate, Calendar.current.isDateInToday(last) { return }
+
         let startOfToday = Calendar.current.startOfDay(for: Date())
         cleanupOldArticles(context: context, before: startOfToday)
 
-        for cat in AINewsBar.Category.allCases {
-            mutate(cat) {
-                $0.dailyDigest = nil
-                $0.recommendedArticleIDs = []
-                $0.lastDigestDate = nil
-                $0.lastRecommendDate = nil
-                $0.digestArticleCount = 0
-                $0.recommendArticleCount = 0
+        let shouldClearState: Bool
+        if let last = lastResetCheckDate {
+            shouldClearState = !Calendar.current.isDateInToday(last)
+        } else {
+            // 首次启动没有 lastResetCheckDate：只清旧文章，避免同日重启把今天的
+            // persisted digest/recommend 清掉。若内存状态明确来自昨天，则仍按跨日清理。
+            shouldClearState = AINewsBar.Category.allCases.contains { cat in
+                let s = state(for: cat)
+                return [s.lastRefreshDate, s.lastDigestDate, s.lastRecommendDate]
+                    .compactMap { $0 }
+                    .contains { !Calendar.current.isDateInToday($0) }
             }
-            prefs.clearDigest(for: cat)
-            prefs.clearRecommendState(for: cat)
+        }
+
+        if shouldClearState {
+            for cat in AINewsBar.Category.allCases {
+                mutate(cat) {
+                    $0.dailyDigest = nil
+                    $0.recommendedArticleIDs = []
+                    $0.lastDigestDate = nil
+                    $0.lastRecommendDate = nil
+                    $0.lastRefreshDate = nil
+                    $0.digestArticleCount = 0
+                    $0.recommendArticleCount = 0
+                }
+                prefs.clearDigest(for: cat)
+                prefs.clearRecommendState(for: cat)
+            }
         }
 
         postUnreadCount(context: context)
         lastResetCheckDate = Date()
-        Log.write("[Refresh] cross-day state reset for all cats (lastReset=\(last))")
+        Log.write("[Refresh] cross-day check complete (clearedState=\(shouldClearState))")
     }
 
     /// per-cat 清旧文章（runRefresh 内用，仅清该 cat）

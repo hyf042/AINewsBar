@@ -324,7 +324,10 @@ final class RefreshService: ObservableObject {
 
         if !newArticles.isEmpty {
             newArticles.forEach { context.insert($0) }
-            guard context.safeSave() else {
+            do {
+                try context.safeSaveOrThrow()
+            } catch {
+                context.rollback()
                 mutate(cat) { $0.lastError = "数据库保存失败，跳过本次刷新" }
                 return
             }
@@ -338,7 +341,10 @@ final class RefreshService: ObservableObject {
         postUnreadCount(context: context)
 
         // v2: Filter Stage 在 Summary 前（仅财报 cat 启用，其他 cat noop）
-        await runFilterStage(cat: cat, context: context)
+        guard await runFilterStage(cat: cat, context: context) else {
+            Log.write("[Refresh][\(cat.rawValue)] abort AI pipeline because filter stage did not persist")
+            return
+        }
 
         await processAI(cat: cat, context: context, hasNewArticles: !newArticles.isEmpty)
         usage?.cleanupOlderThan(days: usageRetentionDays)
@@ -348,9 +354,9 @@ final class RefreshService: ObservableObject {
 
     /// AI Filter：仅对配了 filterPrompt 的 cat 启用（first release：财报）。
     /// fetch accepted==nil && filterFailCount<3 → FilterPipeline → 写回 accepted / 累加 filterFailCount。
-    private func runFilterStage(cat: AINewsBar.Category, context: ModelContext) async {
+    private func runFilterStage(cat: AINewsBar.Category, context: ModelContext) async -> Bool {
         let config = CategoryConfig.for(cat)
-        guard let filterPrompt = config.filterPrompt else { return }
+        guard let filterPrompt = config.filterPrompt else { return true }
 
         let catRaw = cat.rawValue
         let maxFailures = filterMaxFailures
@@ -363,10 +369,11 @@ final class RefreshService: ObservableObject {
             )
         } catch {
             Log.write("[Filter][\(catRaw)] fetch pending failed: \(error)")
-            return
+            mutate(cat) { $0.lastError = "数据库查询失败，跳过筛选" }
+            return false
         }
-        guard !pending.isEmpty else { return }
-        guard let (apiKey, model) = currentCredentials(cat: cat) else { return }
+        guard !pending.isEmpty else { return true }
+        guard let (apiKey, model) = currentCredentials(cat: cat) else { return false }
 
         let tasks = pending.map {
             FilterPipeline.Task(
@@ -415,6 +422,7 @@ final class RefreshService: ObservableObject {
                 do {
                     try context.safeSaveOrThrow()
                 } catch {
+                    context.rollback()
                     mutate(cat) { $0.lastError = "筛选结果保存失败" }
                     Log.write("[Filter][\(catRaw)] save failed: \(error)")
                     persistSucceeded = false
@@ -430,6 +438,7 @@ final class RefreshService: ObservableObject {
         for _ in result.failedIds {
             usage?.recordFailure(scene: .filter, category: cat, model: model)
         }
+        return persistSucceeded
     }
 
     // MARK: - Force regenerate (per-cat)
@@ -443,7 +452,13 @@ final class RefreshService: ObservableObject {
         mutate(cat) { $0.isRegeneratingRecommend = true }
         defer { mutate(cat) { $0.isRegeneratingRecommend = false } }
 
-        let snapshot = ArticleSnapshot.capture(from: context, category: cat)
+        let snapshot: ArticleSnapshot
+        do {
+            snapshot = try ArticleSnapshot.captureOrThrow(from: context, category: cat)
+        } catch {
+            mutate(cat) { $0.lastError = "数据库查询失败，跳过推荐生成" }
+            return
+        }
         await runRecommend(cat: cat, snapshot: snapshot, apiKey: apiKey, model: model)
     }
 
@@ -456,7 +471,13 @@ final class RefreshService: ObservableObject {
         mutate(cat) { $0.isRegeneratingDigest = true }
         defer { mutate(cat) { $0.isRegeneratingDigest = false } }
 
-        let snapshot = ArticleSnapshot.capture(from: context, category: cat)
+        let snapshot: ArticleSnapshot
+        do {
+            snapshot = try ArticleSnapshot.captureOrThrow(from: context, category: cat)
+        } catch {
+            mutate(cat) { $0.lastError = "数据库查询失败，跳过摘要生成" }
+            return
+        }
         await runDigest(cat: cat, snapshot: snapshot, apiKey: apiKey, model: model)
     }
 
@@ -513,6 +534,8 @@ final class RefreshService: ObservableObject {
             endSummaryPipeline(cat)
             if let globalError = result.globalError {
                 self.globalAIError = globalError
+            } else if !result.completed.isEmpty {
+                clearGlobalAIErrorAfterAISuccess()
             }
             commitSummaries(cat: cat, result: result, model: model, context: context)
             coverage = result.completionRate >= coverageThreshold
@@ -523,7 +546,13 @@ final class RefreshService: ObservableObject {
             }
         }
 
-        let snapshot = ArticleSnapshot.capture(from: context, category: cat)
+        let snapshot: ArticleSnapshot
+        do {
+            snapshot = try ArticleSnapshot.captureOrThrow(from: context, category: cat)
+        } catch {
+            mutate(cat) { $0.lastError = "数据库查询失败，跳过推荐/摘要生成" }
+            return
+        }
         guard snapshot.summarizedCount >= 3 else { return }
 
         let s = state(for: cat)
@@ -601,6 +630,7 @@ final class RefreshService: ObservableObject {
             $0.recommendArticleCount = outcome.articleCount
             $0.aiAvailability = .available
         }
+        clearGlobalAIErrorAfterAISuccess()
         prefs.saveRecommendArticleCount(outcome.articleCount, for: cat)
         usage?.record(scene: .recommend, category: cat, model: model, info: outcome.usage)
     }
@@ -611,6 +641,7 @@ final class RefreshService: ObservableObject {
             $0.lastDigestDate = outcome.generatedAt
             $0.digestArticleCount = outcome.articleCount
         }
+        clearGlobalAIErrorAfterAISuccess()
         prefs.saveDigest(content: outcome.content, date: outcome.generatedAt, for: cat)
         prefs.saveDigestArticleCount(outcome.articleCount, for: cat)
         usage?.record(scene: .digest, category: cat, model: model, info: outcome.usage)
@@ -751,6 +782,10 @@ final class RefreshService: ObservableObject {
         if let mapped = GlobalAIError.from(error) {
             globalAIError = mapped
         }
+    }
+
+    private func clearGlobalAIErrorAfterAISuccess() {
+        globalAIError = nil
     }
 
     private func scheduleTimer() {

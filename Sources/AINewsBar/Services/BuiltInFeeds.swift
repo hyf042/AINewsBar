@@ -54,6 +54,7 @@ enum BuiltInFeeds {
     @MainActor
     static func syncInto(context: ModelContext) {
         let expectedURLs = Set(all.map(\.url))
+        let expectedByURL = Dictionary(uniqueKeysWithValues: all.map { ($0.url, $0) })
         let existing = context.safeFetch(
             FetchDescriptor<Feed>(predicate: #Predicate { $0.isBuiltIn == true })
         )
@@ -67,6 +68,31 @@ enum BuiltInFeeds {
             )
             orphans.forEach { context.delete($0) }
             context.delete(feed)
+        }
+
+        // URL 稳定但元数据变化时也要同步；Article 冗余了 category/feedTitle，
+        // category 变化时直接删旧文章，避免跨 tab 污染。
+        for feed in existing {
+            guard let expected = expectedByURL[feed.url] else { continue }
+            let categoryChanged = feed.category != expected.category.rawValue
+            let titleChanged = feed.title != expected.title
+            if categoryChanged {
+                let feedID = feed.id
+                let articles = context.safeFetch(
+                    FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
+                )
+                articles.forEach { context.delete($0) }
+                feed.category = expected.category.rawValue
+            } else if titleChanged {
+                let feedID = feed.id
+                let articles = context.safeFetch(
+                    FetchDescriptor<Article>(predicate: #Predicate { $0.feedID == feedID })
+                )
+                articles.forEach { $0.feedTitle = expected.title }
+            }
+            if titleChanged {
+                feed.title = expected.title
+            }
         }
 
         // 添加缺失的新源（含 category 信息）

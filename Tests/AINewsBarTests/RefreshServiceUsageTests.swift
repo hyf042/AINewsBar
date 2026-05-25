@@ -136,6 +136,16 @@ final class RefreshServiceUsageTests: XCTestCase {
         XCTAssertEqual(service.globalAIError, .invalidAPIKey)
     }
 
+    func testSuccessfulSummaryClearsPreviousGlobalAIError() async {
+        service.globalAIError = .networkUnreachable
+        let feed = seedFeed("https://f/feed")
+        rss.setSuccess(feed.url, [makeRaw("https://a/1")])
+
+        await service.refresh()
+
+        XCTAssertNil(service.globalAIError)
+    }
+
     func testRefreshRecordsRecommendFailure() async {
         struct StubErr: Error {}
         ai.recommendError = StubErr()

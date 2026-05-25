@@ -10,6 +10,17 @@ struct RawArticle: Sendable {
     let publishedAt: Date?
 }
 
+enum RSSFetchError: Error, LocalizedError {
+    case httpStatus(code: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .httpStatus(let code):
+            return "RSS HTTP \(code)"
+        }
+    }
+}
+
 actor RSSService: RSSFetching {
     static let shared = RSSService()
 
@@ -22,12 +33,20 @@ actor RSSService: RSSFetching {
         self.session = URLSession(configuration: config)
     }
 
+    init(session: URLSession) {
+        self.session = session
+    }
+
     func fetchRawArticles(feedURL: String) async throws -> [RawArticle] {
         guard let url = URL(string: feedURL) else {
             throw URLError(.badURL)
         }
 
-        let (data, _) = try await session.data(from: url)
+        let (data, response) = try await session.data(from: url)
+        if let http = response as? HTTPURLResponse,
+           !(200...299).contains(http.statusCode) {
+            throw RSSFetchError.httpStatus(code: http.statusCode)
+        }
         let parser = FeedParser(data: data)
         let parsedFeed = try parser.parse().get()
         return Self.extract(from: parsedFeed)

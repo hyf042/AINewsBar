@@ -3,6 +3,7 @@ import SwiftData
 
 struct FeedRowView: View {
     @Bindable var feed: Feed
+    @Environment(\.modelContext) private var modelContext
     let checkStatus: CheckStatus
     let onCheck: () async -> Void
 
@@ -54,6 +55,9 @@ struct FeedRowView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)
+                .onChange(of: feed.skipFilter) { _, _ in
+                    modelContext.safeSave()
+                }
         }
         .help("跳过 AI 筛选（纯净源用，省 token；如 Apple Newsroom 100% 都是公司动态可开启）")
     }
@@ -116,6 +120,9 @@ struct BuiltInFeedRowView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)
+                .onChange(of: feed.skipFilter) { _, _ in
+                    modelContext.safeSave()
+                }
         }
         .help("跳过 AI 筛选（纯净源用，省 token；如 Apple Newsroom 100% 都是公司动态可开启）")
     }

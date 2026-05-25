@@ -5,6 +5,7 @@ import SwiftUI
 /// - 默认折叠（in-memory @State，每次菜单打开重置——产品立场：摘要+推荐是主视野）
 /// - 展开后承载 loading/error/empty/list，保持白底（macOS Disclosure 标准模式）
 struct ArticleListSection: View {
+    let category: AINewsBar.Category
     let unreadArticles: [Article]
     let readArticles: [Article]
     let onOpen: (Article) -> Void
@@ -12,7 +13,16 @@ struct ArticleListSection: View {
     @EnvironmentObject private var refreshService: RefreshService
     @State private var isExpanded = false
 
+    private var perCatState: CategoryState { refreshService.state(for: category) }
     private var totalCount: Int { unreadArticles.count + readArticles.count }
+
+    private var title: String {
+        switch category {
+        case .ai:        return "今日 AI 文章"
+        case .earnings:  return "今日财报文章"
+        case .news:      return "今日新闻文章"
+        }
+    }
 
     /// 与 MenuBarView 原 listHeight 算法保持一致（实现迁移，行为不变）
     private var listHeight: CGFloat {
@@ -29,8 +39,8 @@ struct ArticleListSection: View {
     /// unread==0 && total>0          → 全部已读 (N 篇)
     private var subtitle: String {
         if totalCount == 0 {
-            if refreshService.isRefreshing { return "加载中…" }
-            if refreshService.lastError != nil { return "获取失败" }
+            if perCatState.isRefreshing { return "加载中…" }
+            if perCatState.lastError != nil { return "获取失败" }
             return "暂无文章"
         }
         let unread = unreadArticles.count
@@ -53,7 +63,7 @@ struct ArticleListSection: View {
             Image(systemName: "list.bullet")
                 .font(Typography.titleEmphasized)
                 .foregroundStyle(TextColor.secondary)
-            Text("今日文章")
+            Text(title)
                 .font(Typography.titleEmphasized)
                 .foregroundStyle(TextColor.secondary)
             Text("· \(subtitle)")
@@ -78,9 +88,9 @@ struct ArticleListSection: View {
 
     @ViewBuilder
     private var articleListContent: some View {
-        if refreshService.isRefreshing && totalCount == 0 {
+        if perCatState.isRefreshing && totalCount == 0 {
             loadingState
-        } else if let error = refreshService.lastError, totalCount == 0 {
+        } else if let error = perCatState.lastError, totalCount == 0 {
             errorState(error)
         } else if totalCount == 0 {
             emptyState

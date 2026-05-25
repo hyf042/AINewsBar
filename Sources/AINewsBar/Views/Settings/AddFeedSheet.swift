@@ -4,10 +4,19 @@ import SwiftData
 struct AddFeedSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Binding var isPresented: Bool
+    /// v2: 默认 cat 来自父 view 当前选中的 Picker；用户可下拉改
+    let defaultCategory: AINewsBar.Category
     @State private var url = ""
     @State private var title = ""
+    @State private var selectedCategory: AINewsBar.Category
     @State private var validationStatus: CheckStatus = .idle
     @State private var showForceAddAlert = false
+
+    init(isPresented: Binding<Bool>, defaultCategory: AINewsBar.Category = .ai) {
+        self._isPresented = isPresented
+        self.defaultCategory = defaultCategory
+        self._selectedCategory = State(initialValue: defaultCategory)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -23,6 +32,15 @@ struct AddFeedSheet: View {
                 TextField("https://example.com/feed.xml", text: $url)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: url) { _, _ in validationStatus = .idle }
+            }
+            LabeledContent("分类") {
+                Picker("", selection: $selectedCategory) {
+                    ForEach(AINewsBar.Category.allCases, id: \.self) { cat in
+                        Text(cat.displayName).tag(cat)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
 
             validationStatusRow
@@ -91,7 +109,8 @@ struct AddFeedSheet: View {
     }
 
     private func addFeed() {
-        let feed = Feed(title: title, url: url, isBuiltIn: false)
+        let feed = Feed(title: title, url: url,
+                        isBuiltIn: false, category: selectedCategory)
         modelContext.insert(feed)
         modelContext.safeSave()
         isPresented = false

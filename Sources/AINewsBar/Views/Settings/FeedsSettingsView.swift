@@ -4,9 +4,15 @@ import SwiftData
 struct FeedsSettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Feed.addedAt) private var feeds: [Feed]
+    @State private var selectedCategory: AINewsBar.Category = .ai
     @State private var checkResults: [UUID: CheckStatus] = [:]
     @State private var isCheckingAll = false
     @State private var showAddSheet = false
+
+    /// 当前 picker 选中 cat 的 feeds
+    private var filteredFeeds: [Feed] {
+        feeds.filter { AINewsBar.Category.from(rawValue: $0.category) == selectedCategory }
+    }
 
     private var summaryText: String? {
         guard !checkResults.isEmpty else { return nil }
@@ -24,9 +30,28 @@ struct FeedsSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // v2: 顶部 Picker 切 cat
+            Picker("", selection: $selectedCategory) {
+                ForEach(AINewsBar.Category.allCases, id: \.self) { cat in
+                    Text(cat.displayName).tag(cat)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .onAppear {
+                selectedCategory = PreferencesService.shared.loadSettingsFeedsTab()
+            }
+            .onChange(of: selectedCategory) { _, newValue in
+                PreferencesService.shared.saveSettingsFeedsTab(newValue)
+            }
+
+            Divider()
+
             List {
                 Section("内置订阅源") {
-                    ForEach(feeds.filter(\.isBuiltIn)) { feed in
+                    ForEach(filteredFeeds.filter(\.isBuiltIn)) { feed in
                         BuiltInFeedRowView(
                             feed: feed,
                             checkStatus: checkResults[feed.id] ?? .idle,
@@ -35,7 +60,7 @@ struct FeedsSettingsView: View {
                     }
                 }
                 Section("自定义订阅源") {
-                    ForEach(feeds.filter { !$0.isBuiltIn }) { feed in
+                    ForEach(filteredFeeds.filter { !$0.isBuiltIn }) { feed in
                         FeedRowView(
                             feed: feed,
                             checkStatus: checkResults[feed.id] ?? .idle,
@@ -43,7 +68,7 @@ struct FeedsSettingsView: View {
                         )
                     }
                     .onDelete { indexSet in
-                        let custom = feeds.filter { !$0.isBuiltIn }
+                        let custom = filteredFeeds.filter { !$0.isBuiltIn }
                         indexSet.map { custom[$0] }.forEach { modelContext.delete($0) }
                         modelContext.safeSave()
                     }
@@ -69,7 +94,8 @@ struct FeedsSettingsView: View {
             .padding(12)
         }
         .sheet(isPresented: $showAddSheet) {
-            AddFeedSheet(isPresented: $showAddSheet)
+            // v2: AddFeedSheet default cat = 当前 picker 选中
+            AddFeedSheet(isPresented: $showAddSheet, defaultCategory: selectedCategory)
         }
     }
 
@@ -85,11 +111,13 @@ struct FeedsSettingsView: View {
         }
     }
 
+    /// v2: 检测范围限当前 picker 选中 cat 的 feeds（避免一次性检测 30+ 个源）
     private func checkAll() async {
         isCheckingAll = true
-        for feed in feeds { checkResults[feed.id] = .checking }
+        let toCheck = filteredFeeds
+        for feed in toCheck { checkResults[feed.id] = .checking }
         await withTaskGroup(of: (UUID, CheckStatus).self) { group in
-            for feed in feeds {
+            for feed in toCheck {
                 let feedURL = feed.url
                 let feedID = feed.id
                 group.addTask {

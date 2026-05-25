@@ -1,17 +1,29 @@
 import SwiftUI
 
+/// v2-multi-category: 按当前 selectedTab 显示对应 cat 的推荐。
 struct RecommendSectionView: View {
-    /// 来自父视图的 @Query 投影；用于在内存中按 id 查找推荐文章（避免重复 fetch）
+    let category: AINewsBar.Category
+    /// 来自父视图的 @Query 投影（已过滤当前 cat）；用于在内存中按 id 查找推荐文章（避免重复 fetch）
     let articles: [Article]
     let onOpen: (Article) -> Void
     @EnvironmentObject private var refreshService: RefreshService
+
+    private var perCatState: CategoryState { refreshService.state(for: category) }
+
+    private var title: String {
+        switch category {
+        case .ai:        return "AI 今日推荐"
+        case .earnings:  return "财报今日推荐"
+        case .news:      return "新闻今日推荐"
+        }
+    }
 
     /// #4 优化：复用父视图 @Query 数据，按 id 内存查找并保序，O(n) 无 IO
     /// 注意：用 uniquingKeysWith 而非 uniqueKeysWithValues —— SwiftData 容灾路径
     /// (BuiltInFeeds.deduplicateArticles) 的存在证明历史曾出现过重复 Article id，
     /// uniqueKeysWithValues 在重复 key 时会 fatalError 让推荐区直接崩溃
     private var picks: [Article] {
-        let ids = refreshService.recommendedArticleIDs
+        let ids = perCatState.recommendedArticleIDs
         guard !ids.isEmpty else { return [] }
         let byID = Dictionary(articles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return ids.compactMap { byID[$0] }
@@ -36,16 +48,16 @@ struct RecommendSectionView: View {
             Image(systemName: "star.fill")
                 .font(Typography.titleEmphasized)
                 .foregroundStyle(loading ? AnyShapeStyle(TextColor.secondary) : AnyShapeStyle(BrandColor.accent))
-            Text("AI 今日推荐")
+            Text(title)
                 .font(Typography.titleEmphasized)
                 .foregroundStyle(TextColor.secondary)
-            if let date = refreshService.lastRecommendDate {
+            if let date = perCatState.lastRecommendDate {
                 Text(date, style: .time)
                     .font(Typography.caption)
                     .foregroundStyle(TextColor.tertiary)
             }
             Spacer()
-            if refreshService.isRegeneratingRecommend {
+            if perCatState.isRegeneratingRecommend {
                 ProgressView().scaleEffect(0.55).frame(width: 12, height: 12)
                 Text("生成中…").font(Typography.caption).foregroundStyle(TextColor.tertiary)
             } else if loading && refreshService.isSummarizing {
@@ -53,14 +65,14 @@ struct RecommendSectionView: View {
                 Text("生成中…").font(Typography.caption).foregroundStyle(TextColor.tertiary)
             } else {
                 Button {
-                    Task { await refreshService.forceRegenerateRecommend() }
+                    Task { await refreshService.forceRegenerateRecommend(category) }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(Typography.caption)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(TextColor.tertiary)
-                .disabled(refreshService.isRegeneratingRecommend || refreshService.isSummarizing)
+                .disabled(perCatState.isRegeneratingRecommend || refreshService.isSummarizing)
                 .help("重新生成推荐")
             }
         }

@@ -2,9 +2,15 @@ import SwiftUI
 import SwiftData
 
 struct FeedRowView: View {
-    let feed: Feed
+    @Bindable var feed: Feed
     let checkStatus: CheckStatus
     let onCheck: () async -> Void
+
+    /// v2: 财报/新闻 cat 才显示 skipFilter toggle（AI cat 没 filter 不展示）
+    private var showSkipFilterToggle: Bool {
+        let cat = AINewsBar.Category.from(rawValue: feed.category)
+        return CategoryConfig.for(cat).filterPrompt != nil
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -18,6 +24,9 @@ struct FeedRowView: View {
                     .lineLimit(1)
             }
             Spacer()
+            if showSkipFilterToggle {
+                skipFilterToggle
+            }
             CheckStatusIcon(status: checkStatus)
             checkButton
         }
@@ -33,6 +42,16 @@ struct FeedRowView: View {
         .buttonStyle(.plain)
         .disabled({ if case .checking = checkStatus { return true }; return false }())
     }
+
+    /// 跳过 AI 筛选 toggle。开启后该源新入库文章 accepted 直接 true，不跑 filter（省 token）。
+    /// 用户应在 30 天用量观察后手动标"纯净源"（如 Apple Newsroom 这种 100% 通过率源）。
+    private var skipFilterToggle: some View {
+        Toggle("", isOn: $feed.skipFilter)
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .help("跳过 AI 筛选（纯净源用，省 token）")
+    }
 }
 
 struct BuiltInFeedRowView: View {
@@ -41,6 +60,11 @@ struct BuiltInFeedRowView: View {
     @EnvironmentObject private var refreshService: RefreshService
     let checkStatus: CheckStatus
     let onCheck: () async -> Void
+
+    private var showSkipFilterToggle: Bool {
+        let cat = AINewsBar.Category.from(rawValue: feed.category)
+        return CategoryConfig.for(cat).filterPrompt != nil
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -54,6 +78,9 @@ struct BuiltInFeedRowView: View {
                     .lineLimit(1)
             }
             Spacer()
+            if showSkipFilterToggle {
+                skipFilterToggle
+            }
             CheckStatusIcon(status: checkStatus)
             checkButton
             Toggle("", isOn: $feed.isEnabled)
@@ -75,6 +102,14 @@ struct BuiltInFeedRowView: View {
         .disabled({ if case .checking = checkStatus { return true }; return false }())
     }
 
+    private var skipFilterToggle: some View {
+        Toggle("", isOn: $feed.skipFilter)
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .help("跳过 AI 筛选（纯净源用，省 token）")
+    }
+
     private func handleToggle(enabled: Bool) {
         let feedID = feed.id
         if !enabled {
@@ -86,7 +121,8 @@ struct BuiltInFeedRowView: View {
         modelContext.safeSave()
         if enabled {
             let service = refreshService
-            Task { await service.refresh() }
+            let cat = AINewsBar.Category.from(rawValue: feed.category)
+            Task { await service.refresh(cat) }
         }
     }
 }

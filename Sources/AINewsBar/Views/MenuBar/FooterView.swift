@@ -2,11 +2,14 @@ import SwiftUI
 import SwiftData
 
 struct FooterView: View {
+    let category: AINewsBar.Category
     @EnvironmentObject private var refreshService: RefreshService
     @Environment(\.openSettings) private var openSettings
     @Query(sort: \UsageRecord.timestamp, order: .reverse) private var usageRecords: [UsageRecord]
 
-    /// 今日成功调用的 token 总数（input + output）。
+    private var perCatState: CategoryState { refreshService.state(for: category) }
+
+    /// v2: 今日成功调用的 token 总数 (三 cat 累加 — spec Q5f Footer 显示总和)。
     /// 在 body 内计算以规避 @Query 谓词初始化时捕获 Date() 的问题（CLAUDE.md 踩坑 #6）。
     private var todayTokenTotal: Int {
         let start = Calendar.current.startOfDay(for: Date())
@@ -17,7 +20,7 @@ struct FooterView: View {
 
     var body: some View {
         HStack {
-            if let date = refreshService.lastRefreshDate {
+            if let date = perCatState.lastRefreshDate {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("最后更新")
                         .font(Typography.caption)
@@ -39,12 +42,12 @@ struct FooterView: View {
                     .foregroundStyle(TextColor.tertiary)
             }
             Spacer()
-            if refreshService.lastFetchErrorCount > 0 {
+            if perCatState.lastFetchErrorCount > 0 {
                 Button {
                     NSApp.activate(ignoringOtherApps: true)
                     openSettings()
                 } label: {
-                    Text("⚠ \(refreshService.lastFetchErrorCount) 个源失败")
+                    Text("⚠ \(perCatState.lastFetchErrorCount) 个源失败")
                         .font(Typography.caption)
                         .foregroundStyle(BrandColor.accent)
                 }

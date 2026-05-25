@@ -5,6 +5,8 @@ import Charts
 struct UsageSettingsView: View {
     @Query(sort: \UsageRecord.timestamp) private var records: [UsageRecord]
     @State private var rangeDays = 7
+    /// v2: 用 nil 表示"全部"（三 cat 聚合）；具体 cat 时仅显示该 cat 数据
+    @State private var selectedCategory: AINewsBar.Category? = nil
     /// 跨日刷新锚点 —— SwiftUI @Query 仅响应 SwiftData 变更，不响应系统时钟
     /// 用户跨过零点后留着 Tab 不动，今日卡片需要这个 State 强制重 eval
     @State private var now = Date()
@@ -13,6 +15,7 @@ struct UsageSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                categoryPicker
                 todaySection
                 trendSection
             }
@@ -26,10 +29,23 @@ struct UsageSettingsView: View {
         }
     }
 
+    // MARK: - v2 Category Picker
+
+    /// 顶部 cat 切换：全部 / AI / 财报 / 新闻
+    private var categoryPicker: some View {
+        Picker("分类", selection: $selectedCategory) {
+            Text("全部").tag(AINewsBar.Category?.none)
+            ForEach(AINewsBar.Category.allCases, id: \.self) { cat in
+                Text(cat.displayName).tag(Optional(cat))
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
     // MARK: - Sections
 
     private var todaySection: some View {
-        let stats = UsageAggregator.todayStats(records, now: now)
+        let stats = UsageAggregator.todayStats(records, now: now, category: selectedCategory)
         return VStack(alignment: .leading, spacing: 8) {
             Text("今日用量")
                 .font(Typography.titleEmphasized)
@@ -64,7 +80,7 @@ struct UsageSettingsView: View {
 
     @ViewBuilder
     private var chart: some View {
-        let points = UsageAggregator.dailyByScene(records, days: rangeDays, now: now)
+        let points = UsageAggregator.dailyByScene(records, days: rangeDays, now: now, category: selectedCategory)
         if points.isEmpty {
             VStack {
                 Text("暂无用量数据")
@@ -83,7 +99,8 @@ struct UsageSettingsView: View {
             .chartForegroundStyleScale([
                 sceneLabel(.summary): .blue,
                 sceneLabel(.recommend): .green,
-                sceneLabel(.digest): .orange
+                sceneLabel(.digest): .orange,
+                sceneLabel(.filter): .purple
             ])
             .chartXAxis {
                 AxisMarks(values: .stride(by: .day)) { value in

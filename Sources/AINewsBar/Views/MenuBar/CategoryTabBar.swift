@@ -34,16 +34,18 @@ struct CategoryTabBar: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(AINewsBar.Category.allCases, id: \.self) { cat in
-                tabButton(for: cat)
+            ForEach(Array(AINewsBar.Category.allCases.enumerated()), id: \.element) { idx, cat in
+                tabButton(for: cat, shortcutIndex: idx + 1)
             }
         }
         .padding(4)
         .background(BrandColor.surfaceMuted)
     }
 
-    private func tabButton(for cat: AINewsBar.Category) -> some View {
+    private func tabButton(for cat: AINewsBar.Category, shortcutIndex: Int) -> some View {
         let isSelected = (cat == selectedTab)
+        // Cmd+1/2/3 切 tab (KeyEquivalent 通过 Character 构造)
+        let shortcutKey = KeyEquivalent(Character("\(shortcutIndex)"))
         return Button {
             withAnimation(.easeInOut(duration: 0.12)) { selectedTab = cat }
         } label: {
@@ -71,5 +73,7 @@ struct CategoryTabBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .keyboardShortcut(shortcutKey, modifiers: .command)
+        .help("\(cat.displayName) (⌘\(shortcutIndex))")
     }
 }

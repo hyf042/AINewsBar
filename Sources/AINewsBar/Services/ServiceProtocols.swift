@@ -85,6 +85,13 @@ protocol PreferencesStoring: AnyObject {
     func loadSettingsFeedsTab() -> Category
     func saveSettingsFeedsTab(_ cat: Category)
 
+    // MARK: per-cat 后台刷新开关 (v2.1 新增)
+    //
+    // 默认 true (开启)。用户可在通用 Tab 关掉某 cat 的后台 timer 刷新省 token。
+    // force refresh / lazy first-tab-switch / 手动 refresh 不受此开关影响。
+    func loadAutoRefreshEnabled(for cat: Category) -> Bool
+    func saveAutoRefreshEnabled(_ enabled: Bool, for cat: Category)
+
     // MARK: per-cat 新签名（Phase 2 引入，Phase 4 后成为正式 API）
 
     func loadDigest(for cat: Category) -> (content: String, date: Date)?

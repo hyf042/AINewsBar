@@ -212,8 +212,14 @@ final class RefreshService: ObservableObject {
     }
 
     /// 三 cat 顺序刷新（timer fire 与首启非首次都走此路径，避免 token QPS 峰值）。
+    /// v2.1: 跳过 `prefs.loadAutoRefreshEnabled(for:) == false` 的 cat 省 token。
+    /// force refresh / lazy first-tab-switch / 手动 refresh 不走此路径，不受开关影响。
     private func refreshAllCatsSequentially() async {
         for cat in AINewsBar.Category.allCases {
+            guard prefs.loadAutoRefreshEnabled(for: cat) else {
+                Log.write("[Refresh][\(cat.rawValue)] auto-refresh disabled, skip")
+                continue
+            }
             await refreshIfNeeded(cat)
         }
     }

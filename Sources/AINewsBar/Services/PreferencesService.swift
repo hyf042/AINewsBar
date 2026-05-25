@@ -65,6 +65,20 @@ final class PreferencesService: PreferencesStoring {
         "com.ainewsbar.\(base).\(cat.rawValue)"
     }
 
+    // MARK: - Auto refresh 开关 (per-cat, v2.1 新增)
+
+    /// 默认 true：未配置过的 cat 视为开启后台刷新。
+    func loadAutoRefreshEnabled(for cat: Category) -> Bool {
+        let k = key("autoRefreshEnabled", cat)
+        // 用 object 检测是否曾 set 过；没 set 过返回 true（默认开启）
+        if defaults.object(forKey: k) == nil { return true }
+        return defaults.bool(forKey: k)
+    }
+
+    func saveAutoRefreshEnabled(_ enabled: Bool, for cat: Category) {
+        defaults.set(enabled, forKey: key("autoRefreshEnabled", cat))
+    }
+
     // MARK: - Digest persistence (per-cat)
 
     func saveDigest(content: String, date: Date, for cat: Category) {

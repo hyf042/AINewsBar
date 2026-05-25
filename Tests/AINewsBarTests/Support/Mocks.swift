@@ -128,6 +128,7 @@ final class InMemoryPrefs: PreferencesStoring {
     private var digestDates: [AINewsBar.Category: Date] = [:]
     private var digestArticleCounts: [AINewsBar.Category: Int] = [:]
     private var recommendArticleCounts: [AINewsBar.Category: Int] = [:]
+    private var autoRefreshEnabled: [AINewsBar.Category: Bool] = [:]   // 未 set 视为 true
     private var _selectedTab: AINewsBar.Category = .ai
     private var _settingsFeedsTab: AINewsBar.Category = .ai
 
@@ -159,6 +160,15 @@ final class InMemoryPrefs: PreferencesStoring {
     func saveSelectedTab(_ cat: AINewsBar.Category) { _selectedTab = cat }
     func loadSettingsFeedsTab() -> AINewsBar.Category { _settingsFeedsTab }
     func saveSettingsFeedsTab(_ cat: AINewsBar.Category) { _settingsFeedsTab = cat }
+
+    // MARK: - per-cat 后台刷新开关 (v2.1)
+
+    func loadAutoRefreshEnabled(for cat: AINewsBar.Category) -> Bool {
+        autoRefreshEnabled[cat] ?? true  // 未 set 默认 true
+    }
+    func saveAutoRefreshEnabled(_ enabled: Bool, for cat: AINewsBar.Category) {
+        autoRefreshEnabled[cat] = enabled
+    }
 
     // MARK: - per-cat 新签名（旧签名由 protocol extension 自动 delegate 到 .ai）
 

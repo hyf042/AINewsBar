@@ -3,6 +3,7 @@ import SwiftData
 
 struct FeedsSettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var refreshService: RefreshService
     @Query(sort: \Feed.addedAt) private var feeds: [Feed]
     @State private var selectedCategory: AINewsBar.Category = .ai
     @State private var checkResults: [UUID: CheckStatus] = [:]
@@ -120,6 +121,9 @@ struct FeedsSettingsView: View {
     private func deleteCustomFeeds(_ feeds: [Feed]) {
         do {
             try FeedSettingsStore.deleteCustomFeeds(feeds, in: modelContext)
+            // 删除自定义源同时删该源所有文章（在 FeedSettingsStore 内）。badge 必须同步
+            // —— 主列表靠 @Query 自动更新，但 menu bar badge 只靠 Notification。
+            refreshService.postUnreadCount(context: modelContext)
         } catch {
             modelContext.rollback()
             deleteErrorMessage = error.localizedDescription

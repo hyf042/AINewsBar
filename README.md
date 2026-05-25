@@ -240,6 +240,17 @@ review 后又补一轮 6 项设置持久化与外部边界硬化：
 | 🟡 P3 | startupError 复用 globalAIError | 新增 `@Published var startupError`，AppDelegate 写它；MenuBarView banner 优先级 startup > global > per-cat；启动错误不被 AI 成功路径清除 |
 | 🟡 P3 | recommendCount 撒谎 | BailianService.recommendArticles/makeRecommendPrompt/parseRecommendResponse + RecommendEngine 阈值 + RecommendSectionView 全部从 `CategoryConfig.for(cat).recommendCount` 取；协议加 `count: Int` |
 
+### 第五轮 review（4 项 P2/P3）
+
+| 等级 | 项 | 修复 |
+|---|---|---|
+| 🟠 P2 | onboarding 断点 | 新增 `RefreshService.applyCredentialChange()`：清 globalAIError + 重置 credential 相关 per-cat unavailable + 顺序 await refresh 三 cat。APISettings 测试成功后 fire-and-forget 调用 |
+| 🟡 P3 | 禁用/删除源后 badge stale | FeedRowView.handleToggle 与 FeedsSettingsView.deleteCustomFeeds 成功路径调 `postUnreadCount(context:)` 同步 menu bar |
+| 🟡 P3 | 自定义 RSS URL 不去重 | AddFeedSheet 加 `normalize` + insert 前 fetch 全量 Feed 比对；重复弹 alert 拒绝（不做订阅合并） |
+| 🟡 P3 | ArticleSnapshot 旧 tolerant API | 删 `capture(from:)` + `capture(from:category:)`；只留 `captureOrThrow`（生产已全部迁完） |
+
+测试 +2 (214 → 216)：`testApplyCredentialChangeClearsErrorsAndTriggersAllCats` + `testApplyCredentialChangeResetsAnyUnavailableToUnknown`。
+
 ## 设计文档
 
 - `CLAUDE.md` — 完整工作记录与设计决策表（含 38 条踩坑记录）

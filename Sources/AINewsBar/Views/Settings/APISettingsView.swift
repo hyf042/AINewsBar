@@ -130,10 +130,13 @@ struct APISettingsView: View {
         do {
             try await BailianService.shared.testConnection(apiKey: apiKey, model: effectiveModel)
             checkStatus = .success(1)
-            // testConnection 成功是全局信号：清 global error。
-            // per-cat aiAvailability 不在此 set —— 旧实现只动 .ai 一个 cat 漏了
-            // earnings/news；正确语义是由下次各 cat 自己的 refresh 自然修正。
-            refreshService.globalAIError = nil
+            // P2 onboarding 断点修复：testConnection 成功后走 applyCredentialChange，
+            // 它会清 globalAIError + 重置 credential 相关 per-cat unavailable +
+            // 顺序触发三 cat refresh（绕过 staleThreshold；旧路径靠 refreshIfNeeded
+            // 时间阈值 + tab lazy load 都不会在 lastRefreshDate 非 nil 时触发）。
+            // fire-and-forget：用户不必在设置页等三 cat 跑完。
+            let service = refreshService
+            Task { await service.applyCredentialChange() }
         } catch {
             checkStatus = .failure(error.localizedDescription)
             // P3-A: 失败时主动 set globalAIError，让菜单主 UI 立即看到状态

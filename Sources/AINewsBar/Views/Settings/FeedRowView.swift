@@ -173,6 +173,11 @@ struct BuiltInFeedRowView: View {
     private func handleToggle(enabled: Bool, revertingTo oldValue: Bool) {
         do {
             try FeedSettingsStore.persistBuiltInEnabledChange(feed: feed, enabled: enabled, in: modelContext)
+            // 禁用源会删除该源所有文章，启用则下面会触发 refresh 抓回。
+            // 两种路径都改变了 "isRead==false && accepted==true" 集合，必须同步
+            // menu bar badge —— 主列表 @Query 会自动更新，但 badge 只靠
+            // Notification (AppDelegate 监听)。不主动 post 就 stale。
+            refreshService.postUnreadCount(context: modelContext)
             if enabled {
                 let service = refreshService
                 let cat = AINewsBar.Category.from(rawValue: feed.category)

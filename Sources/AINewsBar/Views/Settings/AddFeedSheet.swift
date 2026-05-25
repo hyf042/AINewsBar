@@ -116,6 +116,17 @@ struct AddFeedSheet: View {
     }
 
     private func addFeed() {
+        // P3 review：按 normalized URL 去重。重复 feed 会重复抓 RSS、设置页重复显示、
+        // 失败统计重复噪声；按 article URL 去重的下游路径救不了上游重复 fetch。
+        // 不做"订阅合并"复杂方案 —— 拒绝即可，用户改 URL 或先删旧的。
+        let normalized = Self.normalize(url)
+        let existing = (try? modelContext.fetch(FetchDescriptor<Feed>())) ?? []
+        if let dupe = existing.first(where: { Self.normalize($0.url) == normalized }) {
+            saveErrorMessage = "已存在相同 URL 的订阅源（\(dupe.title)），请勿重复添加"
+            showSaveErrorAlert = true
+            return
+        }
+
         let feed = Feed(title: title, url: url,
                         isBuiltIn: false, category: selectedCategory)
         modelContext.insert(feed)
@@ -127,5 +138,14 @@ struct AddFeedSheet: View {
             saveErrorMessage = error.localizedDescription
             showSaveErrorAlert = true
         }
+    }
+
+    /// URL 规范化：去首尾空白 / 小写 / 去尾斜杠。
+    /// 不去 protocol：http vs https 是真不同（前者明文）；不去 query：?format=rss 有意义。
+    /// 故意保守 —— 误拒绝比误合并好（用户能改 URL 重试，合并坏数据无法回滚）。
+    private static func normalize(_ url: String) -> String {
+        var s = url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        while s.hasSuffix("/") { s.removeLast() }
+        return s
     }
 }

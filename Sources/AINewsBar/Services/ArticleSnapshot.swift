@@ -19,31 +19,13 @@ struct ArticleSnapshot: Sendable {
 
     var summarizedCount: Int { summarized.count }
 
-    /// 全表快照（旧 API，等价 capture(from:category:nil)，仅 .ai cat 时建议显式传 .ai）
-    @MainActor
-    static func capture(from context: ModelContext) -> ArticleSnapshot {
-        let articles = context.safeFetch(FetchDescriptor<Article>())
-        return ArticleSnapshot(all: articles.map {
-            Item(id: $0.id, title: $0.title, summary: $0.aiSummary)
-        })
-    }
-
-    /// v2: 单 cat 快照。仅 fetch 该 cat 且 accepted==true 的文章（filter rejected 的不进 snapshot
-    /// 避免污染 Recommend/Digest 输入）。
-    @MainActor
-    static func capture(from context: ModelContext, category: AINewsBar.Category) -> ArticleSnapshot {
-        let catRaw = category.rawValue
-        let articles = context.safeFetch(
-            FetchDescriptor<Article>(predicate: #Predicate {
-                $0.category == catRaw && $0.accepted == true
-            })
-        )
-        return ArticleSnapshot(all: articles.map {
-            Item(id: $0.id, title: $0.title, summary: $0.aiSummary)
-        })
-    }
-
-    /// 严格版本：用于推荐/摘要生成等关键路径。DB 查询失败不应被解释为空文章集。
+    /// 单 cat 快照（严格）：用于推荐/摘要生成等关键路径。DB 查询失败抛错，
+    /// caller 必须显式处理而非把"查询失败"当"无文章"。
+    ///
+    /// 历史上同时存在 `capture(from:)` / `capture(from:category:)` 两个 tolerant 版本
+    /// （safeFetch 失败→空快照）。生产路径全部迁到 `captureOrThrow` 后，
+    /// 那两个 API 已无 caller — 保留只会给后人挖"再写个 fallback"的坑（踩坑 #22 同型）。
+    /// 第五轮 review 删除。
     @MainActor
     static func captureOrThrow(from context: ModelContext, category: AINewsBar.Category) throws -> ArticleSnapshot {
         let catRaw = category.rawValue

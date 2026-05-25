@@ -25,7 +25,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-25 夜 | 6 项设置持久化 / RSS Atom 边界加固：FeedSettingsStore 抽出 / openArticle 失败处理 / Atom rel=alternate 优先（踩坑 #38）；测试 208 → 212 | `b7a917f` |
 | 2026-05-25 深夜 | 第二轮 review 5 项：cleanup 严格化 / FeedRow guard 时序 / APISettings 设 globalAIError / UsageRecording 契约统一 (success=false 强制 0) / AppDelegate syncInto 失败处理；测试 212 → 214 | `bb866b0` |
 | 2026-05-25 深夜 (二) | 第三轮 review 3 项：跨日 cleanup 一致 strict / scheduleTimer 拆出 configure / summary commit 漏走 helper 修复 | `bbb9234` |
-| 2026-05-25 深夜 (三) | 第四轮 review 4 项：auto path 并发→顺序（QPS 15→5）/ postUnreadCount 失败保留 badge / startupError 拆出与 globalAIError 隔离 / recommendCount 真正接入配置 | — |
+| 2026-05-25 深夜 (三) | 第四轮 review 4 项：auto path 并发→顺序（QPS 15→5）/ postUnreadCount 失败保留 badge / startupError 拆出与 globalAIError 隔离 / recommendCount 真正接入配置 | `496d4a6` |
+| 2026-05-25 深夜 (四) | 第五轮 review 4 项：onboarding 断点修复（applyCredentialChange）/ feed 禁用/删除后 badge 同步 / AddFeedSheet URL 去重 / ArticleSnapshot 旧 tolerant API 删除；测试 214 → 216 | — |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -120,6 +121,10 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | postUnreadCount 失败保留 badge（第四轮 review）| `safeFetch` → `safeFetchOrThrow` + do/catch；失败仅 Log 不广播通知 | badge 是用户可见状态，错发 count=0 会让用户以为"全读完了"；保留上一次值是最安全的失败行为 |
 | startupError 与 globalAIError 隔离（第四轮 review）| 新增 `@Published var startupError: String?`；AppDelegate syncInto 失败写 startupError 而非 globalAIError；MenuBarView banner 优先级 startup > global > per-cat | 复用 globalAIError 会被任意 AI 成功 `clearGlobalAIErrorAfterAISuccess` 静默清除；启动错误根因仍在却消失，且 UI 文案"AI 不可用"误导用户怀疑代码 bug |
 | recommendCount 真正接入（第四轮 review）| BailianService.recommendArticles/makeRecommendPrompt/parseRecommendResponse + RecommendEngine 阈值 + RecommendSectionView 全部从 `CategoryConfig.for(cat).recommendCount` 取；协议加 `count: Int` 显式参数 | 旧 3 个硬编码 5 让 CategoryConfig.recommendCount 成"会撒谎的配置"；未来调单 cat 数（如新闻 3 条）只改一处即可 |
+| Onboarding 断点修复（第五轮 review）| RefreshService 新增 `applyCredentialChange()`：清 globalAIError + 重置 credential 相关 per-cat unavailable → .unknown + 顺序 await refresh 三 cat。APISettings.checkConnection 成功 fire-and-forget 调用 | 旧路径：无 key 首启 runRefresh 跑到 AI 段才退出 → lastRefreshDate 已 set；用户保存 key 后 refreshIfNeeded 因 stale 阈值跳过、tab lazy load 因 lastRefreshDate 非 nil 不触发 → AI tab 摘要/推荐空白要等 30 分钟或手动刷新 |
+| Feed 禁用/删除后 badge 同步（第五轮 review）| FeedRowView.handleToggle 成功路径 + FeedsSettingsView.deleteCustomFeeds 成功路径调 `refreshService.postUnreadCount(context:)` | 主列表靠 @Query 自动更新；菜单栏 badge 只靠 NotificationCenter，不主动 post 会 stale 直到下次 refresh/打开菜单 |
+| AddFeedSheet URL 去重（第五轮 review）| 静态 `normalize(_:)` 小写+去尾斜杠；insert 前 fetch 全量 Feed 比对，重复弹 alert 拒绝 | 旧路径无 URL 去重，同 URL 重复 feed 会重复抓 RSS / 重复显示 / 失败统计噪声；article URL 去重只能救文章层不能救 feed 层 |
+| ArticleSnapshot tolerant API 删除（第五轮 review）| 删 `capture(from:)` 与 `capture(from:category:)`（safeFetch 静默空快照），仅留 `captureOrThrow` | 生产路径已全部迁到 captureOrThrow；留着 tolerant 版本只会让后人在"DB 查询失败"和"无文章"间挖坑（踩坑 #22 同型陷阱） |
 
 ---
 

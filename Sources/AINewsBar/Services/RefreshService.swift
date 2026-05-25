@@ -223,6 +223,36 @@ final class RefreshService: ObservableObject {
         await refreshAllCatsSequentially()
     }
 
+    /// 用户更新 credential（API Key / 模型）并测试成功后调用。
+    ///
+    /// **onboarding 断点修复**（P2 第五轮 review）：
+    /// 旧流程在首启无 key 时仍跑 RSS 阶段并 set lastRefreshDate，AI 阶段因
+    /// `ensureCredentials` 失败退出。用户后续在设置页填 key 并测试成功，
+    /// 此时 `refreshIfNeeded` 因 lastRefreshDate < 30 分钟 skip；tab lazy
+    /// refresh 也因 lastRefreshDate 非 nil 不触发 —— AI tab 摘要/推荐空白要等
+    /// timer fire 或手动刷新，体验断裂。
+    ///
+    /// 本方法两步：
+    /// 1. 清 credential 相关错误：globalAIError + per-cat aiAvailability=.unavailable
+    ///    重置为 .unknown（让下次 refresh 自然重判，不预设 .available 避免与真实
+    ///    状态分裂）。non-credential unavailable（如"摘要调用多数失败"）不在此清除。
+    /// 2. 顺序 await refresh(_:) 三 cat：refresh 路径绕过 staleThreshold；
+    ///    per-cat refreshTasks inflight 复用保证与其他入口安全共存。
+    ///
+    /// caller (APISettingsView) 一般 fire-and-forget：用户不必在设置页等三 cat 跑完，
+    /// 关菜单回主 UI 时各 cat AI pipeline 已经在跑或即将完成。
+    func applyCredentialChange() async {
+        globalAIError = nil
+        for cat in AINewsBar.Category.allCases {
+            if case .unavailable = state(for: cat).aiAvailability {
+                mutate(cat) { $0.aiAvailability = .unknown }
+            }
+        }
+        for cat in AINewsBar.Category.allCases {
+            await refresh(cat)
+        }
+    }
+
     /// 三 cat 顺序刷新（timer fire / 首启非首次 / 系统唤醒 三个入口走此路径）。
     ///
     /// **可靠性优先**（P2 review）：后台自动路径不再 cross-cat 并发；

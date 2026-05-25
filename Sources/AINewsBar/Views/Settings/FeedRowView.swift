@@ -179,9 +179,18 @@ struct BuiltInFeedRowView: View {
                 Task { await service.refresh(cat) }
             }
         } catch {
-            modelContext.rollback()
+            // P2-B: 确定性 guard 时序。
+            // 1) 先 arm guard，再触发任何可能让 onChange 重入的操作（rollback 与
+            //    feed.isEnabled = oldValue 都可能触发 SwiftData @Bindable 的变更通知）
+            // 2) 同步路径里期望 onChange 触发恰好一次，guard handler 把它吃掉并 reset
+            // 3) 兜底：用 Task 在下一个 RunLoop turn 强制 reset，避免"没触发 onChange
+            //    → guard 永久卡 true → 吃掉用户下次真实 toggle"
             isRevertingEnabledChange = true
+            modelContext.rollback()
             feed.isEnabled = oldValue
+            Task { @MainActor in
+                isRevertingEnabledChange = false
+            }
             saveErrorMessage = error.localizedDescription
             showSaveErrorAlert = true
         }

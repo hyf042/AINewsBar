@@ -41,6 +41,34 @@ final class UsageRecorderTests: XCTestCase {
         XCTAssertEqual(all.first?.outputTokens, 0)
     }
 
+    // P3-B: helper record(info:success:) 在 success=false 时强制归零
+    // 即便 caller 传了非 zero UsageInfo（如保存失败但 DashScope 已返回 usage）
+    func testRecordHelperZerosTokensOnFailure() throws {
+        let recorder = UsageRecorder(context: ctx)
+        let realUsage = UsageInfo(inputTokens: 500, outputTokens: 100)
+        recorder.record(scene: .summary, category: .ai, model: "m",
+                        info: realUsage, success: false)
+
+        let all = try ctx.fetch(FetchDescriptor<UsageRecord>())
+        XCTAssertEqual(all.count, 1)
+        XCTAssertEqual(all.first?.inputTokens, 0,
+                       "P3-B 契约：success=false 时 helper 必须强制归零，不能用 caller 传的真实 token")
+        XCTAssertEqual(all.first?.outputTokens, 0)
+        XCTAssertEqual(all.first?.success, false)
+    }
+
+    func testRecordHelperPreservesTokensOnSuccess() throws {
+        let recorder = UsageRecorder(context: ctx)
+        let usage = UsageInfo(inputTokens: 500, outputTokens: 100)
+        recorder.record(scene: .summary, category: .ai, model: "m",
+                        info: usage, success: true)
+
+        let all = try ctx.fetch(FetchDescriptor<UsageRecord>())
+        XCTAssertEqual(all.first?.inputTokens, 500)
+        XCTAssertEqual(all.first?.outputTokens, 100)
+        XCTAssertEqual(all.first?.success, true)
+    }
+
     func testCleanupRemovesOlderThanWindow() throws {
         let recorder = UsageRecorder(context: ctx)
 

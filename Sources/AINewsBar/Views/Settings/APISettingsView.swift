@@ -136,8 +136,11 @@ struct APISettingsView: View {
             refreshService.globalAIError = nil
         } catch {
             checkStatus = .failure(error.localizedDescription)
-            // 同上：API Key/Model 失败已由 401/403 走 globalAIError 映射；
-            // 这里不显式 set per-cat aiAvailability 避免只覆盖一个 cat 的不一致。
+            // P3-A: 失败时主动 set globalAIError，让菜单主 UI 立即看到状态
+            // （而不是等下一轮 refresh）。401/403 映射到 invalidAPIKey/forbidden；
+            // 其他错误降级为 .other(localizedDescription)，与 banner UI 复用同套路径。
+            refreshService.globalAIError = GlobalAIError.from(error)
+                ?? .other(error.localizedDescription)
         }
     }
 }

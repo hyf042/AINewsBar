@@ -292,7 +292,16 @@ final class RefreshService: ObservableObject {
         }
 
         let startOfToday = Calendar.current.startOfDay(for: Date())
-        cleanupOldArticles(context: context, category: cat, before: startOfToday)
+        do {
+            try cleanupOldArticles(context: context, category: cat, before: startOfToday)
+        } catch {
+            // P2-A: cleanup 失败必须 rollback + 中止；旧"尽力而为"会留 pending delete
+            // 给后续 insert/AI 路径，commit 时一并 save 可能拖垮整次刷新或污染状态
+            context.rollback()
+            mutate(cat) { $0.lastError = "数据库清理旧文章失败，跳过本次刷新" }
+            Log.write("[Refresh][\(cat.rawValue)] cleanup failed, abort: \(error)")
+            return
+        }
 
         let catRaw = cat.rawValue
         let feeds: [Feed]
@@ -855,16 +864,22 @@ final class RefreshService: ObservableObject {
         Log.write("[Refresh] cross-day check complete (clearedState=\(shouldClearState))")
     }
 
-    /// per-cat 清旧文章（runRefresh 内用，仅清该 cat）
-    private func cleanupOldArticles(context: ModelContext, category: AINewsBar.Category, before date: Date) {
+    /// per-cat 清旧文章（runRefresh 内用，仅清该 cat）。
+    /// 严格版：fetch/save 失败抛出，让 caller 决定 rollback + 中止后续流程。
+    /// 旧"尽力而为"语义会留下 pending delete 给后续 insert/AI 路径，最终 commit 时一并 save
+    /// 可能拖累或冲突；这里要么成功要么干净中止。
+    private func cleanupOldArticles(
+        context: ModelContext, category: AINewsBar.Category, before date: Date
+    ) throws {
         let catRaw = category.rawValue
-        let old = context.safeFetch(
+        let old = try context.safeFetchOrThrow(
             FetchDescriptor<Article>(predicate: #Predicate {
                 $0.category == catRaw && $0.publishedAt < date
             })
         )
+        guard !old.isEmpty else { return }
         old.forEach { context.delete($0) }
-        if !old.isEmpty { context.safeSave() }
+        try context.safeSaveOrThrow()
     }
 
     /// 全 cat 清旧文章（跨日重置内用）

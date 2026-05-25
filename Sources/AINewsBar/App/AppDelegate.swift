@@ -15,9 +15,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let recorder = UsageRecorder(context: ctx)
         recorder.cleanupOlderThan(days: 30)
         RefreshService.shared.configure(with: ctx, usage: recorder)
-        BuiltInFeeds.syncInto(context: ctx)
+
+        // P3-C: 检查 syncInto 返回值。失败意味着 feed 表可能不完整或空，
+        // 后续 refresh 会跑出"无 feed → 0 文章 → lastRefreshDate 更新但 UI 空"
+        // 的诡异状态。失败路径：banner 提示用户重启 + 跳过 launchBackgroundRefresh
+        // 避免污染 "最后刷新时间"。已存在的旧 feed 数据仍可被 refresh 使用。
+        let feedsSynced = BuiltInFeeds.syncInto(context: ctx)
         RefreshService.shared.postUnreadCount(context: ctx)
-        RefreshService.shared.launchBackgroundRefreshIfNeeded()
+
+        if feedsSynced {
+            RefreshService.shared.launchBackgroundRefreshIfNeeded()
+        } else {
+            Log.write("[Startup] BuiltInFeeds.syncInto failed; skip auto-refresh, surface error in UI")
+            RefreshService.shared.globalAIError =
+                .other("内置 RSS 源初始化失败，请重启应用")
+        }
 
         // 监听系统从睡眠唤醒：Timer.scheduledTimer 在 App Nap/睡眠期间不按真实时间累计
         // 唤醒后只合并触发一次，跨日重置可能在用户不点菜单时丢失 24h+；这里兜底

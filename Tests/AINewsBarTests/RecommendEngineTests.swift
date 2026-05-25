@@ -55,6 +55,20 @@ final class RecommendEngineTests: XCTestCase {
         }
     }
 
+    func testThrowsWhenAIReturnsTooFewValidRecommendations() async {
+        ai.recommendProvider = { items in Array(items.prefix(1).map(\.id)) }
+
+        do {
+            _ = try await engine.run(snapshot: snap(count: 5),
+                                      apiKey: "k", model: "m")
+            XCTFail("有效推荐少于 3 个时应视为 malformed response")
+        } catch BailianError.malformedResponse {
+            // OK
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
     func testOutcomeCarriesSummarizedCount() async throws {
         let s = snap(count: 6, summarized: 4)
         let outcome = try await engine.run(snapshot: s,

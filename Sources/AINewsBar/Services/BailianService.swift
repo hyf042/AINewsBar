@@ -25,6 +25,14 @@ actor BailianService: AISummarizing {
     static let shared = BailianService()
 
     private let endpoint = URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")!
+    private let session: URLSession
+
+    init(timeout: TimeInterval = 30) {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = timeout
+        config.timeoutIntervalForResource = timeout
+        self.session = URLSession(configuration: config)
+    }
 
     func testConnection(apiKey: String, model: String) async throws {
         _ = try await chat(prompt: "1", maxTokens: 1, apiKey: apiKey, model: model)
@@ -241,7 +249,7 @@ actor BailianService: AISummarizing {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1

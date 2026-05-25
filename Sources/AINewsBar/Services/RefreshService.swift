@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-enum AIAvailability: Equatable {
+enum AIAvailability: Equatable, Sendable {
     case unknown
     case available
     case unavailable(String)
@@ -9,7 +9,7 @@ enum AIAvailability: Equatable {
 
 /// 全局 AI 错误（v2-multi-category 新增）：与 per-cat 业务错误区分。
 /// API Key / 网络 / 配额等问题影响所有 cat，UI 顶部 sticky banner 显示一条。
-enum GlobalAIError: Equatable {
+enum GlobalAIError: Equatable, Sendable {
     case invalidAPIKey
     case networkUnreachable
     case quotaExceeded
@@ -500,6 +500,9 @@ final class RefreshService: ObservableObject {
             beginSummaryPipeline()
             let result = await summaryPipeline.run(tasks: pendingTasks, apiKey: apiKey, model: model)
             endSummaryPipeline()
+            if let globalError = result.globalError {
+                self.globalAIError = globalError
+            }
             commitSummaries(cat: cat, result: result, model: model, context: context)
             coverage = result.completionRate >= coverageThreshold
             if !coverage && !result.failedIds.isEmpty {
@@ -553,6 +556,7 @@ final class RefreshService: ObservableObject {
                 commit(cat: cat, recommend: outcome, model: model)
             }
         } catch {
+            applyGlobalAIErrorIfNeeded(error)
             mutate(cat) { $0.aiAvailability = .unavailable(error.localizedDescription) }
             usage?.recordFailure(scene: .recommend, category: cat, model: model)
             Log.write("[Recommend][\(cat.rawValue)] ERROR: \(error)")
@@ -570,6 +574,7 @@ final class RefreshService: ObservableObject {
                 commit(cat: cat, digest: outcome, model: model)
             }
         } catch {
+            applyGlobalAIErrorIfNeeded(error)
             mutate(cat) { $0.aiAvailability = .unavailable(error.localizedDescription) }
             usage?.recordFailure(scene: .digest, category: cat, model: model)
             Log.write("[Digest][\(cat.rawValue)] ERROR: \(error)")
@@ -731,6 +736,12 @@ final class RefreshService: ObservableObject {
         return (key, prefs.getModel())
     }
 
+    private func applyGlobalAIErrorIfNeeded(_ error: Error) {
+        if let mapped = GlobalAIError.from(error) {
+            globalAIError = mapped
+        }
+    }
+
     private func scheduleTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
@@ -819,4 +830,39 @@ final class RefreshService: ObservableObject {
 
 extension Notification.Name {
     static let unreadCountChanged = Notification.Name("unreadCountChanged")
+}
+
+extension GlobalAIError {
+    static func from(_ error: Error) -> GlobalAIError? {
+        if let bailian = error as? BailianError {
+            switch bailian {
+            case .httpStatus(let code, _):
+                switch code {
+                case 401, 403:
+                    return .invalidAPIKey
+                case 429:
+                    return .quotaExceeded
+                case 500...599:
+                    return .other("AI 服务暂时不可用")
+                default:
+                    return nil
+                }
+            case .malformedResponse, .insufficientCandidates:
+                return nil
+            }
+        }
+
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else {
+            return nil
+        }
+        let code = URLError.Code(rawValue: nsError.code)
+        switch code {
+        case .notConnectedToInternet, .cannotConnectToHost, .cannotFindHost,
+             .timedOut, .networkConnectionLost, .dnsLookupFailed:
+            return .networkUnreachable
+        default:
+            return nil
+        }
+    }
 }

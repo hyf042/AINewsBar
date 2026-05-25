@@ -27,6 +27,9 @@ struct RecommendEngine {
         let (ids, usage) = try await ai.recommendArticles(
             snapshot.all, category: category, apiKey: apiKey, model: model
         )
+        guard ids.count >= 3 else {
+            throw BailianError.malformedResponse(reason: "推荐响应有效序号不足（\(ids.count)/5）")
+        }
         Log.write("[Recommend][\(category.rawValue)] picked \(ids.count) from \(snapshot.all.count) articles")
         return Outcome(
             ids: ids,

@@ -13,25 +13,27 @@ struct RawArticle: Sendable {
 actor RSSService: RSSFetching {
     static let shared = RSSService()
 
+    private let session: URLSession
+
+    init(timeout: TimeInterval = 10) {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = timeout
+        config.timeoutIntervalForResource = timeout
+        self.session = URLSession(configuration: config)
+    }
+
     func fetchRawArticles(feedURL: String) async throws -> [RawArticle] {
         guard let url = URL(string: feedURL) else {
             throw URLError(.badURL)
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            let parser = FeedParser(URL: url)
-            parser.parseAsync { result in
-                switch result {
-                case .success(let parsedFeed):
-                    continuation.resume(returning: Self.extract(from: parsedFeed))
-                case .failure(let error):
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        let (data, _) = try await session.data(from: url)
+        let parser = FeedParser(data: data)
+        let parsedFeed = try parser.parse().get()
+        return Self.extract(from: parsedFeed)
     }
 
-    private static func extract(from feed: FeedKit.Feed) -> [RawArticle] {
+    static func extract(from feed: FeedKit.Feed) -> [RawArticle] {
         switch feed {
         case .rss(let rss):
             return rss.items?.compactMap { item in
@@ -42,7 +44,8 @@ actor RSSService: RSSFetching {
             return atom.entries?.compactMap { entry in
                 guard let title = entry.title,
                       let link = entry.links?.first?.attributes?.href else { return nil }
-                return RawArticle(title: title, url: link, content: entry.summary?.value, publishedAt: entry.published)
+                return RawArticle(title: title, url: link, content: entry.summary?.value,
+                                  publishedAt: entry.published ?? entry.updated)
             } ?? []
         case .json(let json):
             return json.items?.compactMap { item in

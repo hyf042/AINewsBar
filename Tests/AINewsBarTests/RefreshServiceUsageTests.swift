@@ -126,6 +126,16 @@ final class RefreshServiceUsageTests: XCTestCase {
         }
     }
 
+    func testSummaryHTTP401SetsGlobalInvalidAPIKey() async {
+        ai.summaryError = BailianError.httpStatus(code: 401, bodySnippet: "invalid api key")
+        let feed = seedFeed("https://f/feed")
+        rss.setSuccess(feed.url, [makeRaw("https://a/1")])
+
+        await service.refresh()
+
+        XCTAssertEqual(service.globalAIError, .invalidAPIKey)
+    }
+
     func testRefreshRecordsRecommendFailure() async {
         struct StubErr: Error {}
         ai.recommendError = StubErr()

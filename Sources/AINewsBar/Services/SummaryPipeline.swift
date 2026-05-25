@@ -28,6 +28,7 @@ struct SummaryPipeline {
         let completed: [CompletedItem]
         let failedIds: [UUID]
         let total: Int
+        let globalError: GlobalAIError?
 
         var completionRate: Double {
             RefreshDecision.completionRate(completed: completed.count, total: total)
@@ -40,7 +41,9 @@ struct SummaryPipeline {
     /// 有界并发执行：先种入 maxConcurrent 个任务，每完成一个再添加一个
     /// 响应 Task.isCancelled —— 取消时停止派发新任务 + cancelAll + 不污染 failedIds（取消≠失败）
     func run(tasks: [Task], apiKey: String, model: String) async -> Result {
-        guard !tasks.isEmpty else { return Result(completed: [], failedIds: [], total: 0) }
+        guard !tasks.isEmpty else {
+            return Result(completed: [], failedIds: [], total: 0, globalError: nil)
+        }
         Log.write("[Summary] pending=\(tasks.count), concurrency=\(maxConcurrent)")
 
         let aiRef = ai
@@ -48,6 +51,7 @@ struct SummaryPipeline {
         var completed: [CompletedItem] = []
         var failed: [UUID] = []
         var cancelled = 0
+        var globalError: GlobalAIError?
 
         await withTaskGroup(of: TaskOutcome.self) { group in
             var next = min(cap, tasks.count)
@@ -64,7 +68,9 @@ struct SummaryPipeline {
                 }
                 switch outcome {
                 case .success(let item): completed.append(item)
-                case .failure(let id): failed.append(id)
+                case .failure(let id, let mappedGlobalError):
+                    failed.append(id)
+                    if globalError == nil { globalError = mappedGlobalError }
                 case .cancelled: cancelled += 1
                 }
                 if next < tasks.count, !_Concurrency.Task.isCancelled {
@@ -77,14 +83,15 @@ struct SummaryPipeline {
             }
         }
 
-        let result = Result(completed: completed, failedIds: failed, total: tasks.count)
+        let result = Result(completed: completed, failedIds: failed,
+                            total: tasks.count, globalError: globalError)
         Log.write("[Summary] done: \(completed.count) success, \(failed.count) failed, \(cancelled) cancelled, total=\(tasks.count)")
         return result
     }
 
     private enum TaskOutcome: Sendable {
         case success(CompletedItem)
-        case failure(UUID)
+        case failure(UUID, GlobalAIError?)
         case cancelled  // 与 failure 区分：不计入 failedIds，不记 UsageRecord
     }
 
@@ -105,14 +112,14 @@ struct SummaryPipeline {
             let trimmed = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
                 Log.write("[Summary] empty content for: \(t.title.prefix(30))")
-                return .failure(t.id)
+                return .failure(t.id, nil)
             }
             return .success(CompletedItem(id: t.id, summary: trimmed, usage: usage))
         } catch is CancellationError {
             return .cancelled
         } catch {
             Log.write("[Summary] failed: \(t.title.prefix(30)) — \(error.localizedDescription)")
-            return .failure(t.id)
+            return .failure(t.id, GlobalAIError.from(error))
         }
     }
 }

@@ -29,7 +29,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-25 深夜 (四) | 第五轮 review 4 项：onboarding 断点修复（applyCredentialChange）/ feed 禁用/删除后 badge 同步 / AddFeedSheet URL 去重 / ArticleSnapshot 旧 tolerant API 删除；测试 214 → 216 | `8761c22` |
 | 2026-05-25 深夜 (五) | 第六轮 review 5 项：APISettings 验后保存 / RSS+open 文章 scheme 校验 / AddFeed strict fetch 去重 + trim URL / applyCredentialChange 精确 reason 匹配 / AddFeed 成功触发 refresh；测试 216 → 219 (+RSS scheme +applyCredential 精确化拆 2) | `8866473` |
 | 2026-05-25 深夜 (六) | 第七轮 review 4 项：FilterPipeline 拆 transient vs classification（财报永久 reject 漏洞）/ Filter 后补 postUnreadCount / 检测可用性按钮不动 globalAIError / BuiltInFeeds 插入扫全表去重；测试 219 → 222 | `456aeeb` |
-| 2026-05-25 深夜 (七) | 第八轮 review 4 项：ArticleSnapshot 按 publishedAt 倒序排序 / 删源后清 per-cat digest+recommend 缓存 / saveAndCheck 失败不污染 globalAIError / parseRecommendResponse 改正则提取（支持 "1. 2. 3." 等格式）；测试 222 → 227 + 踩坑 #39 | — |
+| 2026-05-25 深夜 (七) | 第八轮 review 4 项：ArticleSnapshot 按 publishedAt 倒序排序 / 删源后清 per-cat digest+recommend 缓存 / saveAndCheck 失败不污染 globalAIError / parseRecommendResponse 改正则提取（支持 "1. 2. 3." 等格式）；测试 222 → 227 + 踩坑 #39 | `82889ae` |
+| 2026-05-25 深夜 (八) | **v2.0.1 发布**：8 轮 review 累计修复打包 release（含 P1 财报永久 reject 漏洞）；build.sh 加 BUILD_NUMBER 变量避免手动改 Info.plist 与脚本漂移 | `v2.0.1` |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 

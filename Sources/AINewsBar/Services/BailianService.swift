@@ -50,18 +50,19 @@ actor BailianService: AISummarizing {
     }
 
     func recommendArticles(
-        _ items: [ArticleSnapshot.Item],
+        _ items: [ArticleSnapshot.Item], count: Int,
         category: AINewsBar.Category, apiKey: String, model: String
     ) async throws -> (ids: [UUID], usage: UsageInfo) {
         // 候选不足时显式抛错，让 caller 走 aiAvailability=.unavailable 路径
         // 不再退化为返回全部 id（旧逻辑会把含 nil-summary 的退化数据当推荐结果）
-        guard items.count >= 5 else {
+        guard items.count >= count else {
             throw BailianError.insufficientCandidates(count: items.count)
         }
-        let prompt = Self.makeRecommendPrompt(items: items, category: category)
-        // maxTokens 30：5 个 1-2 位数序号 + 4 个分隔符 ≈ 14 字符；留 ~2 倍冗余兼容模型偶发啰嗦
-        let (response, usage) = try await chat(prompt: prompt, maxTokens: 30, apiKey: apiKey, model: model)
-        let ids = Self.parseRecommendResponse(response, totalCount: items.count)
+        let prompt = Self.makeRecommendPrompt(items: items, count: count, category: category)
+        // maxTokens 按 count 动态：每个序号 ~2 字符 + 1 分隔符 ≈ 3 字符；留 ~3 倍冗余兼容模型偶发啰嗦
+        let maxTokens = max(30, count * 9)
+        let (response, usage) = try await chat(prompt: prompt, maxTokens: maxTokens, apiKey: apiKey, model: model)
+        let ids = Self.parseRecommendResponse(response, totalCount: items.count, count: count)
             .map { items[$0 - 1].id }
         return (ids, usage)
     }
@@ -123,8 +124,9 @@ actor BailianService: AISummarizing {
 
     /// AI 推荐 prompt。per-cat 关注角度差异化（AI 从业者 / 投资者 / 关心时事的读者）。
     /// L1: 删除 category 默认值（同 makeSummaryPrompt）。
+    /// `count` 来源于 CategoryConfig.for(cat).recommendCount，让 prompt 与 UI/parser cap 同步。
     static func makeRecommendPrompt(
-        items: [ArticleSnapshot.Item], category: AINewsBar.Category
+        items: [ArticleSnapshot.Item], count: Int, category: AINewsBar.Category
     ) -> String {
         let list = items.prefix(50).enumerated()
             .map { i, item -> String in
@@ -137,15 +139,17 @@ actor BailianService: AISummarizing {
         let intro: String
         switch category {
         case .ai:
-            intro = "以下是今日 AI 资讯列表（标题｜摘要），请从中挑选 5 篇最值得 AI 从业者阅读的文章"
+            intro = "以下是今日 AI 资讯列表（标题｜摘要），请从中挑选 \(count) 篇最值得 AI 从业者阅读的文章"
         case .earnings:
-            intro = "以下是今日财经资讯列表（标题｜摘要），请从中挑选 5 篇对个人投资者最有参考价值的文章（重点是知名公司财报、业绩超预期/不达预期、重要并购/人事）"
+            intro = "以下是今日财经资讯列表（标题｜摘要），请从中挑选 \(count) 篇对个人投资者最有参考价值的文章（重点是知名公司财报、业绩超预期/不达预期、重要并购/人事）"
         case .news:
-            intro = "以下是今日新闻列表（标题｜摘要），请从中挑选 5 篇最重要的新闻（重点是国际国内重大事件、影响广泛的决策）"
+            intro = "以下是今日新闻列表（标题｜摘要），请从中挑选 \(count) 篇最重要的新闻（重点是国际国内重大事件、影响广泛的决策）"
         }
+        // 动态示例：取候选前 count 个序号交错给模型一个保序范例
+        let exampleIndices = (1...min(count, 5)).map(String.init).joined(separator: ",")
         return """
         \(intro)，并按推荐度由高到低排序。\
-        只返回序号，用英文逗号分隔，不要其他内容，例如：7,2,15,9,4
+        只返回序号，用英文逗号分隔，不要其他内容，例如：\(exampleIndices)
 
         \(list)
         """
@@ -193,9 +197,10 @@ actor BailianService: AISummarizing {
     /// 支持的分隔符：英文逗号 / 中文逗号 / 顿号 / 空格 / 换行 / Tab
     static let indexSeparators = CharacterSet(charactersIn: ",，、 \n\t")
 
-    /// 解析模型返回的序号串。返回 1-based 序号数组，保序去重，越界过滤，最多 5 个。
+    /// 解析模型返回的序号串。返回 1-based 序号数组，保序去重，越界过滤，最多 `count` 个。
     /// 模型按推荐度由高到低返回，因此保序即推荐度排序。
-    static func parseRecommendResponse(_ response: String, totalCount: Int) -> [Int] {
+    /// `count` 由 caller (recommendArticles) 从 CategoryConfig 注入；旧测试默认 5 保持兼容。
+    static func parseRecommendResponse(_ response: String, totalCount: Int, count: Int = 5) -> [Int] {
         let parts = response.components(separatedBy: indexSeparators)
         var seen = Set<Int>()
         var result: [Int] = []
@@ -205,7 +210,7 @@ actor BailianService: AISummarizing {
                   !seen.contains(n) else { continue }
             seen.insert(n)
             result.append(n)
-            if result.count == 5 { break }
+            if result.count == count { break }
         }
         return result
     }

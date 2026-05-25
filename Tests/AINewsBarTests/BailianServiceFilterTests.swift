@@ -80,8 +80,8 @@ final class BailianServiceFilterTests: XCTestCase {
         let items: [ArticleSnapshot.Item] = (0..<5).map {
             .init(id: UUID(), title: "T\($0)", summary: "s\($0)")
         }
-        let aiPrompt = BailianService.makeRecommendPrompt(items: items, category: .ai)
-        let earningsPrompt = BailianService.makeRecommendPrompt(items: items, category: .earnings)
+        let aiPrompt = BailianService.makeRecommendPrompt(items: items, count: 5, category: .ai)
+        let earningsPrompt = BailianService.makeRecommendPrompt(items: items, count: 5, category: .earnings)
 
         XCTAssertTrue(aiPrompt.contains("AI 从业者"))
         XCTAssertTrue(earningsPrompt.contains("投资者"))

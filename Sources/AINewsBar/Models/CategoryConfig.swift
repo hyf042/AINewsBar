@@ -12,7 +12,9 @@ struct CategoryConfig: Sendable {
     /// first release：仅财报启用；新闻预留；AI 永远 nil。
     let filterPrompt: String?
 
-    /// AI 推荐挑选篇数。默认 5（与 BailianService.recommendArticles 现有 5 篇硬编码对齐）。
+    /// AI 推荐挑选篇数。BailianService.recommendArticles / makeRecommendPrompt /
+    /// parseRecommendResponse / RecommendEngine 阈值 / RecommendSectionView UI 全部
+    /// 从此字段取值，保证 prompt / parser cap / UI threshold 一致；改值无需多处同步。
     let recommendCount: Int
 
     /// 全部内置配置；以 Category 为 key。运行时通过 `CategoryConfig.for(_:)` 查询。

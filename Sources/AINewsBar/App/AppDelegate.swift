@@ -26,9 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if feedsSynced {
             RefreshService.shared.launchBackgroundRefreshIfNeeded()
         } else {
+            // 走 startupError 而非 globalAIError：RSS/store 启动错误不是 AI 故障，
+            // 不应被任何 AI 成功调用静默清除，也不应让 UI 文案显示成"AI 不可用"。
             Log.write("[Startup] BuiltInFeeds.syncInto failed; skip auto-refresh, surface error in UI")
-            RefreshService.shared.globalAIError =
-                .other("内置 RSS 源初始化失败，请重启应用")
+            RefreshService.shared.startupError = "内置 RSS 源初始化失败，请重启应用"
         }
 
         // 监听系统从睡眠唤醒：Timer.scheduledTimer 在 App Nap/睡眠期间不按真实时间累计

@@ -85,7 +85,7 @@ final class MockAI: AISummarizing, @unchecked Sendable {
     }
 
     func recommendArticles(
-        _ items: [ArticleSnapshot.Item],
+        _ items: [ArticleSnapshot.Item], count: Int,
         category: AINewsBar.Category, apiKey: String, model: String
     ) async throws -> (ids: [UUID], usage: UsageInfo) {
         countLock.withLock {
@@ -95,7 +95,7 @@ final class MockAI: AISummarizing, @unchecked Sendable {
         if let e = recommendError { throw e }
         let ids: [UUID]
         if let p = recommendProvider { ids = p(items) }
-        else { ids = Array(items.prefix(5).map(\.id)) }
+        else { ids = Array(items.prefix(count).map(\.id)) }
         return (ids, recommendUsage)
     }
 

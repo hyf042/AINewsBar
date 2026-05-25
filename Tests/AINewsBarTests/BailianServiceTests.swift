@@ -102,7 +102,7 @@ final class BailianServiceTests: XCTestCase {
             .init(id: UUID(), title: "B", summary: nil),
             .init(id: UUID(), title: "C", summary: "sc")
         ]
-        let prompt = BailianService.makeRecommendPrompt(items: items, category: .ai)
+        let prompt = BailianService.makeRecommendPrompt(items: items, count: 5, category: .ai)
         XCTAssertTrue(prompt.contains("1. A"))
         XCTAssertTrue(prompt.contains("2. B"))
         XCTAssertTrue(prompt.contains("3. C"))
@@ -114,7 +114,7 @@ final class BailianServiceTests: XCTestCase {
         let items = (0..<100).map { i in
             ArticleSnapshot.Item(id: UUID(), title: "T\(i)", summary: "s\(i)")
         }
-        let prompt = BailianService.makeRecommendPrompt(items: items, category: .ai)
+        let prompt = BailianService.makeRecommendPrompt(items: items, count: 5, category: .ai)
         XCTAssertTrue(prompt.contains("50. T49"))
         XCTAssertFalse(prompt.contains("51. T50"), "超过 50 的应被截断")
     }

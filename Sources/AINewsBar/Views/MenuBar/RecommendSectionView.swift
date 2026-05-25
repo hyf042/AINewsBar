@@ -30,12 +30,13 @@ struct RecommendSectionView: View {
         return ids.compactMap { byID[$0] }
     }
 
-    /// RecommendEngine 阈值：候选 < 5 不生成
-    private static let recommendThreshold = 5
+    /// RecommendEngine 阈值：候选 < recommendCount 不生成。
+    /// 走 CategoryConfig.recommendCount 保证 prompt / parser cap / UI threshold 一致。
+    private var recommendThreshold: Int { CategoryConfig.for(category).recommendCount }
 
     var body: some View {
         let loading = picks.isEmpty
-        let candidateShort = articles.count < Self.recommendThreshold
+        let candidateShort = articles.count < recommendThreshold
         VStack(alignment: .leading, spacing: 0) {
             header(loading: loading)
             if loading {
@@ -52,10 +53,10 @@ struct RecommendSectionView: View {
         .background(BrandColor.surfaceMuted)
     }
 
-    /// 候选不足时显示文案而非 5 个占位条（避免永远 placeholder 像 bug）
+    /// 候选不足时显示文案而非 N 个占位条（避免永远 placeholder 像 bug）
     private var candidateShortFootnote: some View {
         HStack {
-            Text("候选不足，需 ≥\(Self.recommendThreshold) 篇文章 (当前 \(articles.count))")
+            Text("候选不足，需 ≥\(recommendThreshold) 篇文章 (当前 \(articles.count))")
                 .font(Typography.caption)
                 .foregroundStyle(TextColor.tertiary)
             Spacer()
@@ -103,7 +104,8 @@ struct RecommendSectionView: View {
     }
 
     private var placeholderRows: some View {
-        ForEach([1, 2, 3, 4, 5], id: \.self) { i in
+        let count = recommendThreshold
+        return ForEach(Array(1...count), id: \.self) { i in
             VStack(spacing: 0) {
                 HStack(alignment: .top, spacing: 8) {
                     Text("\(i)")
@@ -116,7 +118,7 @@ struct RecommendSectionView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
-                if i < 5 { Divider().padding(.leading, 34) }
+                if i < count { Divider().padding(.leading, 34) }
             }
         }
     }

@@ -25,6 +25,7 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-25 夜 | 6 项设置持久化 / RSS Atom 边界加固：FeedSettingsStore 抽出 / openArticle 失败处理 / Atom rel=alternate 优先（踩坑 #38）；测试 208 → 212 | `b7a917f` |
 | 2026-05-25 深夜 | 第二轮 review 5 项：cleanup 严格化 / FeedRow guard 时序 / APISettings 设 globalAIError / UsageRecording 契约统一 (success=false 强制 0) / AppDelegate syncInto 失败处理；测试 212 → 214 | `bb866b0` |
 | 2026-05-25 深夜 (二) | 第三轮 review 3 项：跨日 cleanup 一致 strict / scheduleTimer 拆出 configure / summary commit 漏走 helper 修复 | `bbb9234` |
+| 2026-05-25 深夜 (三) | 第四轮 review 4 项：auto path 并发→顺序（QPS 15→5）/ postUnreadCount 失败保留 badge / startupError 拆出与 globalAIError 隔离 / recommendCount 真正接入配置 | — |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -115,6 +116,10 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | FeedRowView toggle guard 确定性时序（bb866b0）| catch 顺序：**先** arm guard → rollback + 改 oldValue → 末尾 `Task { @MainActor }` 兜底 reset。无论 onChange 实际触发与否 guard 都能解除 | 旧顺序 rollback 在前可能让 feed.isEnabled 已变回 oldValue → 改 oldValue 不触发 onChange → guard 永久卡 true → 吃掉下次真实 toggle |
 | APISettings 失败设 globalAIError（bb866b0）| checkConnection catch 调 `GlobalAIError.from(error) ?? .other(localizedDescription)` 设 refreshService.globalAIError | 旧路径只更新行内 checkStatus，菜单 UI 仍显示旧可用状态直到下轮 refresh，违背"用户在设置页看到失败时主 UI 也应同步"语义 |
 | AppDelegate syncInto 失败可见（bb866b0）| 检查 Bool 返回；失败 set globalAIError + skip launchBackgroundRefreshIfNeeded | 旧实现忽略返回值；feed 表可能空但 refresh 仍跑 → 0 文章 + lastRefreshDate 更新 |
+| Auto path 并发→顺序（第四轮 review）| `refreshAllCatsConcurrently` → `refreshAllCatsSequentially`，timer/wake/launch 三入口顺序 await `refreshIfNeeded(_:)`；手动单 cat / force* 不变 | 旧 3×5=15 峰值靠 "DashScope 30 QPS" provider 不变量保护，限速调整 / key 多端共享一旦发生整次刷新失败；后台路径优先可靠性，峰值降到 5，最坏冷启动 ~1-2 分钟可接受 |
+| postUnreadCount 失败保留 badge（第四轮 review）| `safeFetch` → `safeFetchOrThrow` + do/catch；失败仅 Log 不广播通知 | badge 是用户可见状态，错发 count=0 会让用户以为"全读完了"；保留上一次值是最安全的失败行为 |
+| startupError 与 globalAIError 隔离（第四轮 review）| 新增 `@Published var startupError: String?`；AppDelegate syncInto 失败写 startupError 而非 globalAIError；MenuBarView banner 优先级 startup > global > per-cat | 复用 globalAIError 会被任意 AI 成功 `clearGlobalAIErrorAfterAISuccess` 静默清除；启动错误根因仍在却消失，且 UI 文案"AI 不可用"误导用户怀疑代码 bug |
+| recommendCount 真正接入（第四轮 review）| BailianService.recommendArticles/makeRecommendPrompt/parseRecommendResponse + RecommendEngine 阈值 + RecommendSectionView 全部从 `CategoryConfig.for(cat).recommendCount` 取；协议加 `count: Int` 显式参数 | 旧 3 个硬编码 5 让 CategoryConfig.recommendCount 成"会撒谎的配置"；未来调单 cat 数（如新闻 3 条）只改一处即可 |
 
 ---
 

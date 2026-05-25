@@ -92,17 +92,40 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - Banner (global vs per-cat 区分)
+    // MARK: - Banner (startup vs global vs per-cat 区分)
 
+    /// Banner 优先级：startupError > globalAIError > per-cat aiAvailability
+    /// startupError 不会被任何 AI 成功路径清除，独立显示让根因不被掩盖。
     @ViewBuilder
     private var bannerContent: some View {
-        if let global = refreshService.globalAIError {
+        if let startup = refreshService.startupError {
+            startupBanner(message: startup)
+            Divider()
+        } else if let global = refreshService.globalAIError {
             globalBanner(error: global)
             Divider()
         } else if case .unavailable(let reason) = refreshService.state(for: selectedTab).aiAvailability {
             perCatBanner(reason: reason)
             Divider()
         }
+    }
+
+    /// 启动错误 banner（非 AI 故障；sticky 到重启）
+    private func startupBanner(message: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(BrandColor.accent)
+                .font(Typography.caption)
+            Text("启动错误：\(message)")
+                .font(Typography.caption)
+                .foregroundStyle(TextColor.tertiary)
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .background(BrandColor.accentSoft)
     }
 
     /// 全局错误 banner（API Key 错 / 网络 / 配额 — 影响所有 cat，sticky 一条）

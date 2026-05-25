@@ -15,9 +15,10 @@ protocol AISummarizing: Sendable {
         category: AINewsBar.Category, apiKey: String, model: String
     ) async throws -> (summary: String, usage: UsageInfo)
 
-    /// 入参 items 应包含全部候选；返回选中的 id 列表（保序）+ token 用量。
+    /// 入参 items 应包含全部候选；返回选中的 id 列表（保序，最多 `count` 个）+ token 用量。
+    /// `count` 来源于 CategoryConfig.for(cat).recommendCount，由 caller 传入。
     func recommendArticles(
-        _ items: [ArticleSnapshot.Item],
+        _ items: [ArticleSnapshot.Item], count: Int,
         category: AINewsBar.Category, apiKey: String, model: String
     ) async throws -> (ids: [UUID], usage: UsageInfo)
 

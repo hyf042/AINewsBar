@@ -66,6 +66,13 @@ final class RefreshService: ObservableObject {
     /// global error 影响所有 cat，UI 顶部 sticky banner；per-cat error 在 tab 内 banner。
     @Published var globalAIError: GlobalAIError?
 
+    /// 启动期非 AI 错误（如 RSS 内置源 syncInto 失败 / store 初始化重大问题）。
+    /// 与 globalAIError 分离：
+    /// - 复用 globalAIError 会让任何一次 AI 成功 (`clearGlobalAIErrorAfterAISuccess`)
+    ///   被静默清除，错误"自愈"但根因仍在；UI 也会显示成"AI 不可用"误导用户。
+    /// - startupError 不被 AI 路径触碰，sticky 到重启或显式 reset。
+    @Published var startupError: String?
+
     /// 跨日 guard 专用日期（全局事件，不分 cat）。
     /// 与 lastRefreshDate 分离：旧实现复用 lastRefreshDate 做跨日判断会被 refresh() 末尾抹掉信号。
     var lastResetCheckDate: Date?
@@ -186,7 +193,7 @@ final class RefreshService: ObservableObject {
     /// 后台启动入口（AppDelegate 在 BuiltInFeeds.syncInto 成功后调用）。
     /// **副作用**：启动 hourly timer（首次调用）+ 触发首轮刷新。
     /// v2: 首启 (firstLaunchAfterSchemaUpgrade=true) 仅刷新 AI cat（首屏 27 源全抓体验差）；
-    /// 后续走 refreshAllCatsConcurrently 三 cat 并发。
+    /// 后续走 refreshAllCatsSequentially 三 cat 顺序。
     func launchBackgroundRefreshIfNeeded() {
         // P2-B: timer 在此启动（不再 configure 里启）；sync 失败 AppDelegate 不
         // 调本方法 → timer 永不启动，杜绝"sync 失败但 hourly timer 仍跑空"
@@ -204,35 +211,37 @@ final class RefreshService: ObservableObject {
             }
         } else {
             Task { @MainActor [weak self] in
-                await self?.refreshAllCatsConcurrently()
+                await self?.refreshAllCatsSequentially()
             }
         }
     }
 
-    /// 系统从睡眠唤醒后的兜底入口：先做跨日重置，再并发触发三 cat 刷新。
+    /// 系统从睡眠唤醒后的兜底入口：先做跨日重置，再顺序触发三 cat 刷新。
     /// 这是后台自动刷新语义，仍尊重 per-cat auto-refresh 开关。
     func handleSystemWake() async {
         resetCrossedDayStateIfNeeded()
-        await refreshAllCatsConcurrently()
+        await refreshAllCatsSequentially()
     }
 
-    /// 三 cat 并发刷新（timer fire / 首启非首次 / 系统唤醒 三个入口走此路径）。
-    /// QPS 评估：每 cat 内部 5 并发 summary，峰值 3×5=15，DashScope 30 QPS 上限内安全。
-    /// 并发优势：冷启动从串行 1-2 分钟降到 ~30 秒（取决于最慢的 cat）。
+    /// 三 cat 顺序刷新（timer fire / 首启非首次 / 系统唤醒 三个入口走此路径）。
+    ///
+    /// **可靠性优先**（P2 review）：后台自动路径不再 cross-cat 并发；
+    /// 旧实现峰值 QPS 3×5=15，靠"DashScope 30 QPS"这个 provider 不变量保护，
+    /// 不变量一旦变（限速调整 / 同一 key 多端共享）整次刷新失败。
+    /// 顺序方案峰值仅 5（cat 内部 SummaryPipeline 并发不变），最坏冷启动从
+    /// ~30s 拉长到 ~1-2 分钟，但后台用户不在等屏幕，可接受。
+    ///
     /// v2.1: 跳过 `prefs.loadAutoRefreshEnabled(for:) == false` 的 cat 省 token。
-    /// force refresh / lazy first-tab-switch / 手动 refresh 不走此路径，不受开关影响。
+    /// 手动单 cat refresh / force refresh / lazy first-tab-switch 不走此路径，
+    /// 保留 cat 内并发即可（用户在等响应）。
     /// 同 cat 不会双发：refresh(_:) 内部 refreshTasks inflight 复用机制保证幂等。
-    private func refreshAllCatsConcurrently() async {
-        await withTaskGroup(of: Void.self) { group in
-            for cat in AINewsBar.Category.allCases {
-                guard prefs.loadAutoRefreshEnabled(for: cat) else {
-                    Log.write("[Refresh][\(cat.rawValue)] auto-refresh disabled, skip")
-                    continue
-                }
-                group.addTask { @MainActor [weak self] in
-                    await self?.refreshIfNeeded(cat)
-                }
+    private func refreshAllCatsSequentially() async {
+        for cat in AINewsBar.Category.allCases {
+            guard prefs.loadAutoRefreshEnabled(for: cat) else {
+                Log.write("[Refresh][\(cat.rawValue)] auto-refresh disabled, skip")
+                continue
             }
+            await refreshIfNeeded(cat)
         }
     }
 
@@ -256,12 +265,19 @@ final class RefreshService: ObservableObject {
     /// v2: 全局未读计数（三 cat 累加，仅算 accepted=true）。menu bar 图标 badge 显示此值。
     /// per-cat badge（如 "AI (3)"）由 CategoryTabBar 内 @Query 独立 count。
     /// 必须 filter accepted=true：filter 拒绝/待筛的文章不应计入 (财报/新闻 cat 否则 badge 虚高)。
+    ///
+    /// P3 review：fetch 失败**不能**广播 count=0 —— badge 是用户可见状态，错发 0
+    /// 会让用户以为"全读完了"。改 strict fetch + 失败 log 不发通知，保留上一次 badge 值。
     func postUnreadCount(context: ModelContext) {
-        let articles = context.safeFetch(
-            FetchDescriptor<Article>(predicate: #Predicate { $0.isRead == false })
-        )
-        let count = articles.filter { $0.accepted == true }.count
-        NotificationCenter.default.post(name: .unreadCountChanged, object: count)
+        do {
+            let articles = try context.safeFetchOrThrow(
+                FetchDescriptor<Article>(predicate: #Predicate { $0.isRead == false })
+            )
+            let count = articles.filter { $0.accepted == true }.count
+            NotificationCenter.default.post(name: .unreadCountChanged, object: count)
+        } catch {
+            Log.write("[Refresh] postUnreadCount fetch failed, keep previous badge: \(error)")
+        }
     }
 
     // MARK: - Main pipeline (per-cat)
@@ -822,7 +838,7 @@ final class RefreshService: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.resetCrossedDayStateIfNeeded()
-                await self?.refreshAllCatsConcurrently()
+                await self?.refreshAllCatsSequentially()
             }
         }
     }

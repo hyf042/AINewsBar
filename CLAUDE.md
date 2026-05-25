@@ -79,8 +79,22 @@ macOS 菜单栏 AI 资讯阅读器。通过 `/grill-me` 技术访谈定义设计
 5. **设计决策记录新增**：见末尾 "AI 输出净化" / "DigestSection 折叠策略" 行
 6. **`feedback_ainewsbar_pitfalls.md` 新增 #26**：AI prompt 未约束格式→markdown 噪声，需 prompt + UI strip 双手硬
 
+**2026-05-25 增量**：从 AINewsBar（单一 AI 资讯）扩展为「资讯助手」多分类（AI / 财报 / 新闻）。grill 16 题访谈 → 单 spec 文档（`docs/plans/multi-category-redesign.md`）→ 6 phase 顺序实施 + 实操 11 项 fix（commit `ec7f254` → `e3e8282`）。
+
+1. **Schema v2-multi-category**：Article/Feed/UsageRecord 加 `category: String` 冗余字段（SwiftData @Query 不支持 join，冗余 1 字段换 O(1) 过滤）；Article 加 `accepted: Bool?` / `filterFailCount`；Feed 加 `skipFilter`；UsageScene 加 `.filter`
+2. **Migration 全清策略**：`AppDelegate.makeContainer` schemaVersion 检测，不匹配则 nuke 旧 store + 白名单清 `com.ainewsbar.*` 旧 prefs（保留 API Key + Model + launchAtLogin + SwiftUI window 状态）+ 标 `firstLaunchAfterSchemaUpgrade`
+3. **FilterPipeline + AISummarizing 协议双轨**：新增 `classifyArticle`；3 套 cat-specific prompt（summary/recommend/digest）；财报 filter 判定"是/否"（max_tokens=10 / temperature=0.1 / 首字符容错）；失败 3 次永久 reject
+4. **RefreshService dict 化**：`@Published states: [Category: CategoryState]` + 12 个 backward-compat shortcut properties 走 `.ai`；per-cat `refreshTasks` inflight；timer fire `refreshAllCatsSequentially` 顺序遍历避免 QPS 峰值；首启 firstLaunch 仅触发 AI cat（财报/新闻 lazy on first tab switch）
+5. **UI 全 cat 化**：新建 `CategoryTabBar` (HStack 3 等宽按钮替代 Picker.segmented 避免 macOS 内容宽度问题) + 6 子 view 接 `selectedTab` + Settings 4 Tab 加顶部 Picker；global vs per-cat banner 区分；`.id(selectedTab)` 让 cat 切换重建子 view 重置 `@State`
+6. **27 内置源**（curl 验证）：AI 11 不动 + 财报 8（6 en + 2 zh，中文财报 RSS 稀缺为 known limitation）+ 新闻 8（4 en + 4 zh）
+7. **测试 +37 case (149 → 186)**：FilterPipeline 10 / BailianServiceFilter 11 / RefreshServicePerCategory 8 / PreferencesServiceCategory 6 / CategoryConfig 7 / BuiltInFeeds +3
+8. **修正旧记录**：实际 `BailianService.recommendArticles` 与 UI 都是 **5 篇** 不是 3 篇（旧 CLAUDE.md 错记，本次同步修正第 156 行）
+
+---
+
 **位置：** `/Users/hyf042/Projects/AINewsBar`  
-**性质：** 个人工具，Swift Package Manager，macOS 14+，无 Xcode project 文件
+**性质：** 个人工具，Swift Package Manager，macOS 14+，无 Xcode project 文件  
+**程序名**（v2 起）：「资讯助手」（CFBundleDisplayName）；binary 仍 `AINewsBar`
 
 ---
 
@@ -130,6 +144,12 @@ macOS 菜单栏 AI 资讯阅读器。通过 `/grill-me` 技术访谈定义设计
 | AI banner 双值 opacity | accentSoft 浅色 0.08 / 深色 0.20 | 深色下 8% 几乎不可见，必须双值；浅色 8% 已足够 |
 | AI 输出净化 | `MarkdownStripper.strip` 纯函数在 `DigestEngine.run` 与 `SummaryPipeline.runOne` 双点接入；prompt 端同步追加"不要使用 markdown 语法"约束 | 单靠 prompt 不可靠（temperature > 0 + 模型自由度）；单靠 strip 易出"strip 后纯文本结构错乱"。两手都要硬，prompt 主防 + UI strip 兜底；处理范围保守（`**` / `__` / 行首 `# ## ###`），保留 `- * +` 中文列表层次 |
 | DigestSection 折叠策略 | 默认 `isExpanded=true` 全展开 + 点击可折叠；去掉 hover 自动展开与 lineLimit(5) 收起态裁切 | 摘要本就是"一眼看完"，折叠违背设计意图；用户痛点是"差 1-2 行"——根因是 lineLimit(5) + AI 偶发输出 6-7 行（含 markdown 噪声更糟），双 bug 互相强化；保留点击折叠让"嫌长可手动收"的少数派可用 |
+| Category 维度落位（v2）| Feed/Article/UsageRecord 加 `category: String` 冗余字段（Article 从 feed 派生写入时保证一致）；Feed:Category 1:1；3 cat 硬编码 enum (`.ai/.earnings/.news`)；CategoryConfig 持有 per-cat filterPrompt + recommendCount | SwiftData @Query 不支持 join，1 字段冗余换 O(1) 过滤；3 cat 是产品决策不是数据（未来加 cat 必然要改 prompt/UI），enum 简单到位 |
+| Filter Stage 落位 | 入库后标 `accepted: Bool?`（nil/true/false）；财报 cat 必备 + 其他 cat 可选（CategoryConfig.filterPrompt 为 nil 则 skip）；filter 失败 3 次永久 reject | A "入库前 filter 丢 reject" 看似省事实际每次抓 RSS 都重判同一篇 reject 反复花 token；B 保留原始数据让 prompt 迭代时能 review "被错杀"案例 |
+| 协议双轨策略 | 改协议加 cat 参数时同步保留旧无 cat 签名走 protocol extension delegate to .ai（PreferencesStoring / AISummarizing / UsageRecording）| 让 Phase N 改协议时零侵入 Phase N+1 才改的调用方（如 Prefs 改造时 RefreshService 不动）；Phase 4 改造完后可删旧签名 |
+| RefreshService dict 化（v2）| `@Published states: [Category: CategoryState]` + 12 个 backward-compat shortcut computed properties 走 `.ai`；per-cat `refreshTasks` inflight；timer fire 顺序遍历避免 QPS 峰值；首启 firstLaunchAfterSchemaUpgrade 仅触发 AI cat | 保留 backward-compat properties 让旧测试 149 个零侵入；timer 顺序而非并发避免 3 cat × 5 并发 = 15 并发触 DashScope QPS 上限；首启 27 源全抓 1-2 分钟体验差，only AI 优先保首屏 |
+| Migration 全清策略（v2）| schemaVersion="v2-multi-category" 不匹配则 nuke 旧 store + 白名单清 `com.ainewsbar.*` 业务 key（保留 API Key + Model + launchAtLogin + SwiftUI window 状态）+ 标 firstLaunchAfterSchemaUpgrade | 用户接受历史数据全清；白名单 vs 全 domain 清掉是为保 launchAtLogin 等系统级 key |
+| CategoryTabBar 实现（v2）| HStack 3 个 Button 等宽 `.frame(maxWidth: .infinity)` 替代 `Picker(.segmented)`；选中态 `unemphasizedSelectedContentBackgroundColor` + 0.5pt primary border + shadow + semibold 字重 | macOS Picker(.segmented) 按内容宽度无法等分撑满（vs iOS 行为不同，踩坑 #35）；选中态用 macOS native segmented selected 色保证明暗双适配（vs 自己用 dynamic provider 风险高）|
 
 ```bash
 cd /Users/hyf042/Projects/AINewsBar
@@ -151,7 +171,7 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 1. RSS 抓取，11 个内置源，**全并发抓取**，每小时刷新，只保留当天文章，过期自动清理
 2. AI 单篇摘要：最多 5 并发生成，使用前 1500 字符内容，强制中文，无论原文语言
 3. 今日 AI 资讯摘要：基于标题+摘要生成 2-3 句概述，悬停临时展开/点击固定展开，max_tokens=300；含手动刷新按钮
-4. AI 今日推荐：AI 挑选 3 篇，基于标题+摘要综合判断，附摘要，不受已读状态影响；含手动刷新按钮
+4. AI 今日推荐：AI 挑选 5 篇，基于标题+摘要综合判断，附摘要，不受已读状态影响；含手动刷新按钮
 5. 推荐区/摘要区**骨架占位**：未生成时显示灰条 + "生成中…" 提示
 6. 已读文章显示在列表底部（"已读 (n)" 分隔行），标题色降低；Header 显示 [未读/总数]
 7. 订阅源开关：设置页 Toggle，关闭时删除该源文章
@@ -518,3 +538,50 @@ Button("检测可用性") { Task { await checkConnection() } }
 涉及 6 个按钮修复：APISettingsView "显示/隐藏"（策略 A）/ "检测可用性"（策略 B）/ FeedRowView 自定义 + builtin 行的 "检测"（策略 A）/ FooterView "⚠ N 个源失败"（策略 A）/ MenuBarView aiUnavailableBanner "去设置"（策略 A）。
 
 **心得**：SwiftUI 容器组件（Button / Label / ToolbarItem 等）对其 root-level modifier 与 label-internal modifier 的语义不一致是一类常见陷阱。**外层 `.foregroundStyle` 在控件类型上语义≠在普通 View 上语义** —— Button 的外层 modifier 是给"按钮外壳"（背景/边框/聚焦环）而非 label 内容用的。任何"想给按钮文字染色"的需求，**默认走 label-internal**；用 `.tint()` 是系统强调色全局染色的快捷方式，但只对**系统主样式 Button** 生效，plain 也不响应 `.tint`。
+
+### 34. SwiftData `@Query` 谓词 3 个 `&&` 条件链让 type-checker 超时
+
+`@Query(filter: #Predicate<Article> { $0.isRead == false && $0.category == "ai" && $0.accepted == true })` 三个条件用 `&&` 连接编译时 "the compiler is unable to type-check this expression in reasonable time"。SwiftData 谓词 macro 展开 + Swift type-check 复杂度爆炸。
+
+**修复**：拆分。@Query 谓词只放 1 个简单条件 (category)，其他过滤 (isRead / accepted) 放在 view 层 `articles.filter { ... }`。
+
+```swift
+// FAIL：3 条件谓词超时
+@Query(filter: #Predicate<Article> { $0.isRead == false && $0.category == "ai" && $0.accepted == true })
+
+// OK：单条件 @Query + view 层 filter
+@Query(filter: #Predicate<Article> { $0.category == "ai" })
+private var aiArticles: [Article]
+private var aiUnread: [Article] { aiArticles.filter { !$0.isRead && $0.accepted == true } }
+```
+
+**心得**：SwiftData @Query 谓词复杂度阈值很低（2 条件 OK，3 条件超时）；超时直接表现为编译失败而非性能问题。数据量小时（每 cat 几十-上百）内存 filter 性能开销忽略，安全可靠。
+
+### 35. macOS `Picker(.segmented)` 按内容宽度，无法等分撑满容器
+
+`Picker("", selection:).pickerStyle(.segmented)` 在 macOS 上 3 个 segment 按内容宽度绘制，给 Picker 加 `.frame(maxWidth: .infinity)` 也只让容器变宽，segment 仍居中。与 iOS 行为不同。
+
+**修复**：自定义 HStack 3 个 Button 等宽 (`.frame(maxWidth: .infinity)`) + 选中态用 `Color(nsColor: .unemphasizedSelectedContentBackgroundColor)` 模仿 native segmented。
+
+**心得**：iOS / macOS 同样 `.pickerStyle(.segmented)` API 但行为差异大；macOS Picker segmented 设计假设是"按需宽度"（compact toolbar 场景）。需要 tab-style 等宽必须自定义。`unemphasizedSelectedContentBackgroundColor` 是 macOS native segmented selected segment 的色，明暗双适配优于自己用 dynamic provider。
+
+### 36. SwiftUI cat-aware view 的 `@State` 在 cat 切换时被继承
+
+主 view 通过 `selectedTab` 参数传给子 view（如 `ArticleListSection(category: selectedTab)`），切 cat 时子 view 的 `@State isExpanded` 保留——SwiftUI 通过 view 类型识别 identity，cat 参数变化不触发重建。
+
+**修复**：`.id(selectedTab)` 让 SwiftUI 把不同 cat 的子 view 当作不同 view 实例，自动重置 `@State`。
+
+```swift
+ArticleListSection(category: selectedTab, ...)
+    .id(selectedTab)  // cat 切换强制重建 → 重置 @State isExpanded
+```
+
+**心得**：SwiftUI view identity 默认走类型；同类型 + 参数不同不会重建。需要"参数变就重置内部状态"语义时显式 `.id(参数)`。代价：每次切换重建子 view 树（@Query 也重新构造），性能开销在菜单栏小 view 可忽略。
+
+### 37. 启动期 RSS fetch 失败常见 race（DNS / 网络栈未就绪）
+
+AppDelegate `applicationDidFinishLaunching` 触发 refresh，此时 macOS networking 可能未完全就绪，11 个 AI 源全 throw（DNS 超时）。但用户后续在 Settings 手动检测时一切正常，看到 Footer "11 个源失败" 困惑。
+
+**修复**：UI 提示错误是历史快照 + 让按钮直接重试当前 cat（而非跳设置）。文案 `"⚠ 上次 X 源失败 · 点击重试"` 明示"过去时态"。
+
+**心得**：网络相关的"启动期 race"在 macOS 桌面 app 是常见模式（不像 iOS 有 background launch states）。最佳实践：UI 标明数据时态 + 提供一键重试，避免用户误以为现网失败。延迟启动 N 秒不是好方案（影响首屏体验）。

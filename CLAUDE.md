@@ -27,7 +27,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-25 深夜 (二) | 第三轮 review 3 项：跨日 cleanup 一致 strict / scheduleTimer 拆出 configure / summary commit 漏走 helper 修复 | `bbb9234` |
 | 2026-05-25 深夜 (三) | 第四轮 review 4 项：auto path 并发→顺序（QPS 15→5）/ postUnreadCount 失败保留 badge / startupError 拆出与 globalAIError 隔离 / recommendCount 真正接入配置 | `496d4a6` |
 | 2026-05-25 深夜 (四) | 第五轮 review 4 项：onboarding 断点修复（applyCredentialChange）/ feed 禁用/删除后 badge 同步 / AddFeedSheet URL 去重 / ArticleSnapshot 旧 tolerant API 删除；测试 214 → 216 | `8761c22` |
-| 2026-05-25 深夜 (五) | 第六轮 review 5 项：APISettings 验后保存 / RSS+open 文章 scheme 校验 / AddFeed strict fetch 去重 + trim URL / applyCredentialChange 精确 reason 匹配 / AddFeed 成功触发 refresh；测试 216 → 219 (+RSS scheme +applyCredential 精确化拆 2) | — |
+| 2026-05-25 深夜 (五) | 第六轮 review 5 项：APISettings 验后保存 / RSS+open 文章 scheme 校验 / AddFeed strict fetch 去重 + trim URL / applyCredentialChange 精确 reason 匹配 / AddFeed 成功触发 refresh；测试 216 → 219 (+RSS scheme +applyCredential 精确化拆 2) | `8866473` |
+| 2026-05-25 深夜 (六) | 第七轮 review 4 项：FilterPipeline 拆 transient vs classification（财报永久 reject 漏洞）/ Filter 后补 postUnreadCount / 检测可用性按钮不动 globalAIError / BuiltInFeeds 插入扫全表去重；测试 219 → 222 | — |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -130,6 +131,10 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | RSS+open 文章 scheme 校验（第六轮 review）| RSSService.fetchRawArticles 与 MenuBarView.openArticle 都 guard `scheme == "http" || "https"`；拒绝 file://、javascript:、shell: | RSS 是外部输入；NSWorkspace.open 不应被诱导打开任意 scheme |
 | applyCredentialChange 精确 reason 匹配（第六轮 review）| 静态常量 `RefreshService.missingCredentialReason = "未配置 API Key"`；ensureCredentials set 该 reason，applyCredentialChange 精确比对，**只清** credential 那一条 | 第五轮注释说"non-credential 不清"但实现 set all .unavailable→.unknown；会掩盖"摘要调用多数失败/摘要保存失败"等真业务错误 |
 | AddFeed strict fetch + trim + 触发 refresh（第六轮 review）| 重复检测改 `try modelContext.fetch` strict，失败弹 alert；URL/title 存盘前 trim 空白；保存成功后 fire-and-forget `service.refresh(selectedCategory)` | 旧 `try? ... ?? []` 是 false-empty 写路径；空白字符进库；添加后若该 tab 刚刷新过 lastRefreshDate 挡住 lazy refresh 让用户体感"加了没用" |
+| FilterPipeline 拆 transient vs classification（第七轮 P1）| `Result` 新增 `classificationFailedIds` / `transientFailedIds` / `firstTransientGlobalError`。只有 `BailianError.malformedResponse` 计 classificationFailed→ recordFilterFailure；其他错误（HTTP 401/403/429/5xx、网络、未知）算 transient，保持 accepted=nil 下轮重试 + 设 globalAIError 提示用户 | 旧实现 `.failed(id)` 一锅炖，网络抖动/401/429 都累计 filterFailCount 3 次后永久 reject 财报文章；这是个真实数据丢失漏洞 |
+| Filter 持久化后补 postUnreadCount（第七轮 P2）| runFilterStage `persistSucceeded && !writeIds.isEmpty` 时调 `postUnreadCount(context:)` | 财报文章 accepted=nil 时不计入 badge；filter 通过后 accepted=true，badge 应该立即更新；menu bar label 只听通知不补就 stale 到下次 refresh / 菜单打开 |
+| 检测可用性按钮不动 globalAIError（第七轮 P3）| `checkConnection()` 完全删 set/clear globalAIError；只更新本页 checkStatus；`saveAndCheck` 仍维持成功 set/失败 set globalAIError（持久化路径） | 检测候选 ≠ 主流程持久化值；旧实现成功清/失败设 globalAIError 让候选好 key 误清主 UI 错误，或候选坏 key 误显示全局错误 |
+| BuiltInFeeds 插入扫全表去重（第七轮 P3）| 新增源插入前从 `context.fetch(FetchDescriptor<Feed>())` 扫全表（含 custom）比对 URL；删除/元数据同步仍只动 built-in | 旧实现只扫 built-in，如果某 URL 被加入 built-in 时用户已有同 URL custom 源，会插入重复 feed；重复 fetch + 重复显示 + 失败统计噪声 |
 
 ---
 

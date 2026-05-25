@@ -143,6 +143,14 @@ struct APISettingsView: View {
         }
     }
 
+    /// "检测可用性" 按钮：纯查询语义 —— 测候选 key/model 能不能跑通，**完全不动**
+    /// refreshService.globalAIError。
+    ///
+    /// 第七轮 P3 review：旧实现成功清/失败设 globalAIError，会污染主 UI 状态：
+    /// - 旧 prefs 中 key 已坏（主 UI 显示 globalAIError），用户拿候选好 key 来测 → 误清主 UI 错误
+    /// - 旧 prefs 中 key 好，用户拿候选坏 key 来测 → 误显示全局错误，主 UI 误报
+    /// 检测按钮的"输入"和主流程的"持久化值"是两份数据，状态必须隔离。
+    /// 主 UI 状态只能由实际运行中的 refresh / saveAndCheck 持久化路径来改。
     @MainActor
     private func checkConnection() async {
         guard !apiKey.isEmpty, !effectiveModel.isEmpty else { return }
@@ -150,14 +158,8 @@ struct APISettingsView: View {
         do {
             try await BailianService.shared.testConnection(apiKey: apiKey, model: effectiveModel)
             checkStatus = .success(1)
-            // 仅测试通过，不持久化（按钮语义是"检测可用性"）
-            // testConnection 成功是全局信号：清 global error。per-cat aiAvailability
-            // 不在此 set —— 由下次各 cat 自己的 refresh 自然修正。
-            refreshService.globalAIError = nil
         } catch {
             checkStatus = .failure(error.localizedDescription)
-            refreshService.globalAIError = GlobalAIError.from(error)
-                ?? .other(error.localizedDescription)
         }
     }
 }

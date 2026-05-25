@@ -26,7 +26,8 @@ final class FilterPipelineTests: XCTestCase {
         XCTAssertEqual(result.total, 0)
         XCTAssertTrue(result.acceptedIds.isEmpty)
         XCTAssertTrue(result.rejectedIds.isEmpty)
-        XCTAssertTrue(result.failedIds.isEmpty)
+        XCTAssertTrue(result.classificationFailedIds.isEmpty)
+        XCTAssertTrue(result.transientFailedIds.isEmpty)
         XCTAssertEqual(result.cancelledCount, 0)
         XCTAssertEqual(ai.classifyCallCount, 0)
     }
@@ -67,15 +68,50 @@ final class FilterPipelineTests: XCTestCase {
 
     // MARK: - 失败处理（AI 抛错）
 
-    func testAIErrorMarkedAsFailed() async {
+    /// 第七轮 P1：未知错误 → transientFailed（不计 filterFailCount）
+    func testUnknownErrorMarkedAsTransient() async {
         struct E: Error {}
         ai.classifyError = E()
         let tasks = makeTasks(count: 3)
         let result = await pipeline.run(tasks: tasks, apiKey: "k", model: "m")
         XCTAssertEqual(result.acceptedIds.count, 0)
         XCTAssertEqual(result.rejectedIds.count, 0)
-        XCTAssertEqual(result.failedIds.count, 3)
+        XCTAssertEqual(result.classificationFailedIds.count, 0,
+                       "未知错误不能进 classificationFailed（否则财报会因网络抖动被永久 reject）")
+        XCTAssertEqual(result.transientFailedIds.count, 3)
         XCTAssertEqual(result.total, 3)
+    }
+
+    /// 第七轮 P1：BailianError.malformedResponse → classificationFailed（计数）
+    /// 这是"模型确实无法分类"，应累计 filterFailCount。
+    func testMalformedResponseMarkedAsClassificationFailed() async {
+        ai.classifyError = BailianError.malformedResponse(reason: "filter 响应无法解析：xyz")
+        let tasks = makeTasks(count: 3)
+        let result = await pipeline.run(tasks: tasks, apiKey: "k", model: "m")
+        XCTAssertEqual(result.classificationFailedIds.count, 3)
+        XCTAssertEqual(result.transientFailedIds.count, 0)
+        XCTAssertNil(result.firstTransientGlobalError)
+    }
+
+    /// 第七轮 P1：HTTP 401 → transient + firstTransientGlobalError=.invalidAPIKey
+    /// 让 caller 设 globalAIError 提示用户；同时 article 保持 accepted=nil 下次重试。
+    func testHTTP401MarkedAsTransientWithGlobalError() async {
+        ai.classifyError = BailianError.httpStatus(code: 401, bodySnippet: "invalid api key")
+        let tasks = makeTasks(count: 2)
+        let result = await pipeline.run(tasks: tasks, apiKey: "k", model: "m")
+        XCTAssertEqual(result.classificationFailedIds.count, 0,
+                       "HTTP 401 不能算 classificationFailed —— 不能因为 key 错把财报永久 reject")
+        XCTAssertEqual(result.transientFailedIds.count, 2)
+        XCTAssertEqual(result.firstTransientGlobalError, .invalidAPIKey)
+    }
+
+    /// 第七轮 P1：HTTP 429 quota → transient + .quotaExceeded
+    func testHTTP429MarkedAsTransient() async {
+        ai.classifyError = BailianError.httpStatus(code: 429, bodySnippet: "rate limit")
+        let tasks = makeTasks(count: 2)
+        let result = await pipeline.run(tasks: tasks, apiKey: "k", model: "m")
+        XCTAssertEqual(result.transientFailedIds.count, 2)
+        XCTAssertEqual(result.firstTransientGlobalError, .quotaExceeded)
     }
 
     // MARK: - 取消（race-free：仅验证不卡死 + 结果完整性，不验证 cancel 命中率）
@@ -92,7 +128,8 @@ final class FilterPipelineTests: XCTestCase {
 
         XCTAssertEqual(result.total, 10, "pipeline 应能完成不卡死")
         let processed = result.acceptedIds.count + result.rejectedIds.count
-                      + result.failedIds.count + result.cancelledCount
+                      + result.classificationFailedIds.count + result.transientFailedIds.count
+                      + result.cancelledCount
         // 取消时机不确定：早期取消可能让所有 task 都不被种入（processed=0），
         // 晚期取消可能让部分 task 已跑完。两种都是合法行为，只验证不超量
         XCTAssertLessThanOrEqual(processed, result.total,

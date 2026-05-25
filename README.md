@@ -263,6 +263,17 @@ review 后又补一轮 6 项设置持久化与外部边界硬化：
 
 测试 +3 (216 → 219)：`testFetchRejectsNonHttpScheme` + `testFetchAcceptsHttpAndHttps` + applyCredential 精确化拆 2 个（净 +1）。
 
+### 第七轮 review（4 项 P1-P3，含一个真实数据丢失漏洞）
+
+| 等级 | 项 | 修复 |
+|---|---|---|
+| 🔴 P1 | FilterPipeline 把网络错误也算入 filterFailCount（永久 reject 财报文章）| `Result` 拆 `classificationFailedIds` / `transientFailedIds` / `firstTransientGlobalError`；仅 `BailianError.malformedResponse` 计入 filterFailCount，HTTP 401/403/429/5xx + 网络 + 未知都算 transient（保持 accepted=nil，下轮重试） |
+| 🟠 P2 | Filter 后 badge stale | 持久化成功且有写入时补 `postUnreadCount(context:)`；财报文章 accepted=nil→true 时 badge 立即更新 |
+| 🟡 P3 | 检测可用性污染主 UI | `checkConnection()` 完全删 set/clear globalAIError；只更新本页 checkStatus（候选 vs 持久化值状态隔离） |
+| 🟡 P3 | BuiltInFeeds 仅扫 built-in 去重 | 插入前 fetch 全表（含 custom）比对 URL；删除/同步仍只动 built-in |
+
+测试 +3 (219 → 222)：`testUnknownErrorMarkedAsTransient` (rename) + `testMalformedResponseMarkedAsClassificationFailed` + `testHTTP401MarkedAsTransientWithGlobalError` + `testHTTP429MarkedAsTransient`（净 +3）。
+
 ## 设计文档
 
 - `CLAUDE.md` — 完整工作记录与设计决策表（含 38 条踩坑记录）

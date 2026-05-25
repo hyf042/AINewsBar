@@ -25,14 +25,23 @@ struct FilterPipeline {
     struct Result: Sendable {
         let acceptedIds: [UUID]
         let rejectedIds: [UUID]
-        let failedIds: [UUID]       // AI 调用失败（HTTP / 解析失败）；caller 走 filterFailCount++ 路径
+        /// **真实的"模型无法分类"**：BailianError.malformedResponse 解析失败。
+        /// caller 走 `Article.recordFilterFailure` 路径，累计到 maxBeforeReject 永久 reject。
+        let classificationFailedIds: [UUID]
+        /// **transient 失败**：HTTP 401/403/429/5xx / 网络抖动 / 其他临时错误。
+        /// caller **不能**累计 filterFailCount —— 否则网络抖动会把财报文章永久拒绝。
+        /// 保持 accepted=nil，等下一轮 refresh 重试。
+        let transientFailedIds: [UUID]
         let cancelledCount: Int     // 取消≠失败：不记 UsageRecord
-        let usages: [UsageInfo]     // 与所有 accepted/rejected/failed 一一对应（cancelled 无 usage）
+        let usages: [UsageInfo]     // 与所有 accepted/rejected 一一对应（failed/cancelled 无 usage）
+        /// 第一条 transient 失败映射出来的全局错误（可用于 set globalAIError，UI 提示用户）
+        let firstTransientGlobalError: GlobalAIError?
         let total: Int
 
         static let empty = Result(
-            acceptedIds: [], rejectedIds: [], failedIds: [],
-            cancelledCount: 0, usages: [], total: 0
+            acceptedIds: [], rejectedIds: [],
+            classificationFailedIds: [], transientFailedIds: [],
+            cancelledCount: 0, usages: [], firstTransientGlobalError: nil, total: 0
         )
     }
 
@@ -40,7 +49,7 @@ struct FilterPipeline {
     let maxConcurrent: Int
     let promptTemplate: String   // 来自 CategoryConfig.filterPrompt（caller 确保非 nil）
 
-    /// 有界并发执行。Task.isCancelled 时停止派发 + cancelAll；cancelled 不污染 failedIds。
+    /// 有界并发执行。Task.isCancelled 时停止派发 + cancelAll；cancelled 不污染 failed*Ids。
     func run(tasks: [Task], apiKey: String, model: String) async -> Result {
         guard !tasks.isEmpty else { return .empty }
         Log.write("[Filter] pending=\(tasks.count), concurrency=\(maxConcurrent)")
@@ -50,7 +59,9 @@ struct FilterPipeline {
         let cap = maxConcurrent
         var accepted: [UUID] = []
         var rejected: [UUID] = []
-        var failed: [UUID] = []
+        var classificationFailed: [UUID] = []
+        var transientFailed: [UUID] = []
+        var firstTransient: GlobalAIError?
         var cancelled = 0
         var usages: [UsageInfo] = []
 
@@ -75,9 +86,14 @@ struct FilterPipeline {
                 case .rejected(let id, let usage):
                     rejected.append(id)
                     usages.append(usage)
-                case .failed(let id):
-                    failed.append(id)
-                    // failed 不记 usage（HTTP 失败无 token；解析失败 token 微小可忽略）
+                case .classificationFailed(let id):
+                    classificationFailed.append(id)
+                    // 不记 usage：BailianError.malformedResponse 抛错前 token 可忽略
+                case .transientFailed(let id, let global):
+                    transientFailed.append(id)
+                    if firstTransient == nil, global != nil {
+                        firstTransient = global
+                    }
                 case .cancelled:
                     cancelled += 1
                 }
@@ -93,17 +109,24 @@ struct FilterPipeline {
         }
 
         let result = Result(
-            acceptedIds: accepted, rejectedIds: rejected, failedIds: failed,
-            cancelledCount: cancelled, usages: usages, total: tasks.count
+            acceptedIds: accepted, rejectedIds: rejected,
+            classificationFailedIds: classificationFailed,
+            transientFailedIds: transientFailed,
+            cancelledCount: cancelled, usages: usages,
+            firstTransientGlobalError: firstTransient,
+            total: tasks.count
         )
-        Log.write("[Filter] done: \(accepted.count) accepted, \(rejected.count) rejected, \(failed.count) failed, \(cancelled) cancelled, total=\(tasks.count)")
+        Log.write("[Filter] done: \(accepted.count) accepted, \(rejected.count) rejected, \(classificationFailed.count) classFail, \(transientFailed.count) transient, \(cancelled) cancelled, total=\(tasks.count)")
         return result
     }
 
     private enum TaskOutcome: Sendable {
         case accepted(UUID, UsageInfo)
         case rejected(UUID, UsageInfo)
-        case failed(UUID)
+        /// 模型响应无法解析（BailianError.malformedResponse）→ 真"分类失败"，累计 filterFailCount
+        case classificationFailed(UUID)
+        /// HTTP / 网络 / credential / 其他临时错误 → 不累计；可用第二个参数提示全局
+        case transientFailed(UUID, GlobalAIError?)
         case cancelled
     }
 
@@ -122,8 +145,16 @@ struct FilterPipeline {
         } catch is CancellationError {
             return .cancelled
         } catch {
-            Log.write("[Filter] failed: \(t.title.prefix(30)) — \(error.localizedDescription)")
-            return .failed(t.id)
+            // P1 第七轮 review：仅 BailianError.malformedResponse 算"模型确实无法分类"，
+            // 其他全归 transient（HTTP 401/403/429/5xx、网络抖动、未知错误），不计入
+            // filterFailCount，让下一轮 refresh 自然重试。
+            // 防止网络问题把财报文章永久 reject。
+            if case BailianError.malformedResponse = error {
+                Log.write("[Filter] classificationFailed: \(t.title.prefix(30)) — \(error.localizedDescription)")
+                return .classificationFailed(t.id)
+            }
+            Log.write("[Filter] transientFailed: \(t.title.prefix(30)) — \(error.localizedDescription)")
+            return .transientFailed(t.id, GlobalAIError.from(error))
         }
     }
 }

@@ -106,9 +106,14 @@ enum BuiltInFeeds {
                 }
             }
 
-            // 添加缺失的新源（含 category 信息）
-            let existingURLs = Set(existing.map(\.url))
-            all.filter { !existingURLs.contains($0.url) }
+            // 添加缺失的新源（含 category 信息）。
+            // P3 第七轮 review：插入去重必须扫**所有** feed URL（含 custom），不能只
+            // 扫 built-in。否则用户已有的同 URL 自定义源在该 URL 被加入内置源时会被
+            // 忽略，导致两条同 URL feed 共存（重复 fetch / 重复显示 / 失败统计噪声）。
+            // 删除 / 元数据同步仍只动 built-in（custom 由用户管理）。
+            let allFeeds = try context.safeFetchOrThrow(FetchDescriptor<Feed>())
+            let anyExistingURLs = Set(allFeeds.map(\.url))
+            all.filter { !anyExistingURLs.contains($0.url) }
                 .map { entry in
                     Feed(title: entry.title, url: entry.url,
                          isBuiltIn: true, category: entry.category)

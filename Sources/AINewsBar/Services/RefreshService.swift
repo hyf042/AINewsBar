@@ -461,17 +461,23 @@ final class RefreshService: ObservableObject {
         let result = await pipeline.run(tasks: tasks, apiKey: apiKey, model: model)
 
         // 写回 Article (用 id 重 fetch alive Article，避免持有跨 await @Model 引用)
+        // **P1 第七轮 review**：只有 classificationFailedIds 计入 filterFailCount。
+        // transientFailedIds（HTTP/网络/credential）保持 accepted=nil，下一轮 refresh
+        // 时 fetch pending 谓词 `accepted == nil && filterFailCount < maxFailures` 会
+        // 再次抓到这些文章重试。
         let acceptedSet = Set(result.acceptedIds)
         let rejectedSet = Set(result.rejectedIds)
-        let failedSet = Set(result.failedIds)
-        let allIds = Array(acceptedSet) + Array(rejectedSet) + Array(failedSet)
+        let classificationFailedSet = Set(result.classificationFailedIds)
+        // 写回需要 fetch 的 id 集合：accepted + rejected + classificationFailed。
+        // transient 不写 (article.accepted/filterFailCount 都不动)，省一次 fetch
+        let writeIds = Array(acceptedSet) + Array(rejectedSet) + Array(classificationFailedSet)
 
         var persistSucceeded = true
-        if !allIds.isEmpty {
+        if !writeIds.isEmpty {
             let alive: [Article]
             do {
                 alive = try context.safeFetchOrThrow(
-                    FetchDescriptor<Article>(predicate: #Predicate { allIds.contains($0.id) })
+                    FetchDescriptor<Article>(predicate: #Predicate { writeIds.contains($0.id) })
                 )
             } catch {
                 mutate(cat) { $0.lastError = "数据库查询失败，跳过筛选结果保存" }
@@ -485,10 +491,10 @@ final class RefreshService: ObservableObject {
                     article.accepted = true
                 } else if rejectedSet.contains(article.id) {
                     article.accepted = false
-                } else if failedSet.contains(article.id) {
+                } else if classificationFailedSet.contains(article.id) {
                     article.recordFilterFailure(maxBeforeReject: filterMaxFailures)
                     if article.accepted == false {
-                        Log.write("[Filter][\(catRaw)] permanently rejecting after \(filterMaxFailures) failures: \(article.title.prefix(30))")
+                        Log.write("[Filter][\(catRaw)] permanently rejecting after \(filterMaxFailures) classification failures: \(article.title.prefix(30))")
                     }
                 }
             }
@@ -504,12 +510,28 @@ final class RefreshService: ObservableObject {
             }
         }
 
-        // Token usage: accepted + rejected 都有 usage；failed 不记 token 但记失败次数
+        // P1: transient 错误期间至少把 globalAIError 提示用户（不污染 per-cat
+        // unavailable，因为 transient 可能下一轮就自愈）
+        if let transientGlobal = result.firstTransientGlobalError {
+            globalAIError = transientGlobal
+        }
+
+        // P2 第七轮 review：filter 持久化成功后必须补 postUnreadCount。
+        // 财报文章入库时 accepted=nil，被 runRefresh 末尾的 postUnreadCount 过滤掉；
+        // 这里 accepted 变 true 后 badge 计数会变 — menu bar label 只听通知，
+        // 不补就 stale 到下次 refresh 或菜单打开（accepted=false 同样改变计数）。
+        if persistSucceeded && !writeIds.isEmpty {
+            postUnreadCount(context: context)
+        }
+
+        // Token usage: accepted + rejected 都有 usage；
+        // classificationFailed 与 transientFailed 都不记 token（无 usage）；
+        // 仅 classificationFailed 记 recordFailure（transient 不算 AI 服务质量损坏）
         for usageInfo in result.usages {
             usage?.record(scene: .filter, category: cat, model: model,
                           info: usageInfo, success: persistSucceeded)
         }
-        for _ in result.failedIds {
+        for _ in result.classificationFailedIds {
             usage?.recordFailure(scene: .filter, category: cat, model: model)
         }
         return persistSucceeded

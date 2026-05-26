@@ -97,19 +97,48 @@ Sources/AINewsBar/
     ├── Typography.swift / TextColor.swift / BrandColor.swift
 ```
 
-## 安装（直接使用预构建包）
+## 安装（朋友友好指南）
 
-1. 下载最新 `AINewsBar-x.y.z.zip`，解压得到 `AINewsBar.app`（Bundle 内部显示名为「资讯助手」）
-2. 将 `AINewsBar.app` 拖入 `/Applications`
-3. 首次打开时 macOS Gatekeeper 会提示"无法验证开发者"（ad-hoc 签名，非 App Store 分发）
+> 这是个人工具，使用 ad-hoc 签名（**未经 Apple 公证**）。首次打开时会提示"已损坏"或"无法验证开发者"，按下面步骤走一次即可，之后正常双击启动。
+> 不是病毒、不是恶意软件 —— 是 Apple 强制所有未付 $99/年开发者会员的 app 都得走这一步。
 
-**解决方法（二选一）：**
-- **右键打开**：在 Finder 中右键 `AINewsBar.app` → 打开 → 仍要打开
-- **命令行解除隔离**：
-  ```bash
-  xattr -cr /Applications/AINewsBar.app
-  open /Applications/AINewsBar.app
-  ```
+### 步骤 1 ：下载 + 拖到 Applications
+
+1. 从 [Releases](../../releases) 下载最新 `AINewsBar-x.y.z.dmg`
+2. 双击 DMG，在弹出的窗口里把「资讯助手」**拖到 Applications 文件夹**
+3. 关闭 DMG，进入「访达 → 应用程序」
+
+### 步骤 2 ：首次右键打开授权
+
+直接双击会弹"已损坏，无法打开"对话框（这是 Gatekeeper 拦截，正常）。**第一次必须右键打开：**
+
+1. 在「应用程序」里找到「资讯助手」
+2. **右键（或按住 Control 单击）→ 打开**
+3. 弹出对话框选择「**打开**」（按钮可能藏在「移到废纸篓」旁边的灰色文字区域）
+
+如果右键菜单**没有「打开」选项**，或对话框只有「移到废纸篓」按钮（macOS 15 Sequoia 起常见），改走步骤 3。
+
+### 步骤 3 ：系统设置授权（macOS 15+ 必走）
+
+1. 打开「**系统设置 → 隐私与安全性**」
+2. 滚到底部「**安全性**」区块，能看到「"资讯助手" 已被阻止...」提示
+3. 点旁边的「**仍要打开**」按钮
+4. 输入 Mac 登录密码确认
+5. 之后正常双击启动，菜单栏右上角会出现「资讯助手」图标
+
+### 步骤 4 ：填 API Key
+
+详见后面的 [配置 API Key](#配置-api-key) 章节。需要阿里云百炼（DashScope）的 API Key。
+
+---
+
+**如果还是打不开**（"app 已损坏" 反复出现）—— 通常是 `com.apple.quarantine` xattr 没被系统清掉。最后一招：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/AINewsBar.app
+```
+
+打开「访达 → 应用程序 → 实用工具 → 终端」粘贴这一行回车即可。这条命令只是"告诉 macOS 这个文件不是从网上下载的"，不修改任何文件内容。
 
 ## 从源码构建
 
@@ -121,7 +150,7 @@ cd AINewsBar
 ./scripts/build.sh
 ```
 
-脚本自动完成：停止已运行实例 → release 构建 → 签名 → 打包为 `build/AINewsBar-x.y.z.zip`。
+脚本自动完成：停止已运行实例 → release 构建 → ad-hoc 签名 → 打包为 `build/AINewsBar-x.y.z.dmg`（含 .app + Applications 软链）。
 
 构建后启动：
 ```bash

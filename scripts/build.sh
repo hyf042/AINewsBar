@@ -13,7 +13,10 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 APP_BUNDLE="$PROJECT_DIR/build/$APP_NAME.app"
 BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
-ZIP_NAME="$APP_NAME-${VERSION}.zip"
+DMG_NAME="$APP_NAME-${VERSION}.dmg"
+DMG_PATH="$PROJECT_DIR/build/$DMG_NAME"
+DMG_STAGE="$PROJECT_DIR/build/dmg-stage"
+DMG_VOLUME="$DISPLAY_NAME ${VERSION}"
 
 cd "$PROJECT_DIR"
 
@@ -75,14 +78,35 @@ cp ".build/release/$APP_NAME" "$BINARY"
 chmod +x "$BINARY"
 
 echo "==> Signing (ad-hoc)..."
+# ad-hoc 签名只在本机 + 无 quarantine 时可信。GitHub release 下载后必然带
+# `com.apple.quarantine` xattr，Gatekeeper 拒绝运行（"已损坏"对话框）。
+# 朋友首次安装需要按 README "朋友安装指南"右键打开授权一次。
+# 长期方案是 Apple Developer ID + Notarization（$99/年），见 README 末段。
 codesign --sign - --force --deep "$APP_BUNDLE"
 
-echo "==> Packaging $ZIP_NAME..."
-cd "$PROJECT_DIR/build"
-rm -f "$ZIP_NAME"
-zip -qr "$ZIP_NAME" "$APP_NAME.app"
-cd "$PROJECT_DIR"
+echo "==> Packaging DMG $DMG_NAME..."
+# DMG vs ZIP：DMG 内 .app + Applications 软链让朋友"拖进 Applications"安装，
+# 比 zip 散落 .app 体感更像"正经安装包"。DMG 文件本身仍会带 quarantine xattr，
+# 但里面 .app 一旦拖出来用户已经走过 Finder 安装动作，比直接双击解压更稳健。
+# -fs HFS+ 必需，否则 Applications 软链会被打平成空文件夹。
+rm -rf "$DMG_STAGE"
+rm -f "$DMG_PATH"
+mkdir -p "$DMG_STAGE"
+cp -R "$APP_BUNDLE" "$DMG_STAGE/"
+ln -s /Applications "$DMG_STAGE/Applications"
+
+hdiutil create \
+    -volname "$DMG_VOLUME" \
+    -srcfolder "$DMG_STAGE" \
+    -ov \
+    -format UDZO \
+    -fs HFS+ \
+    "$DMG_PATH" > /dev/null
+
+rm -rf "$DMG_STAGE"
 
 echo ""
-echo "Done: build/$ZIP_NAME"
+echo "Done: build/$DMG_NAME"
 echo "Run:  $BINARY &"
+echo ""
+echo "分发: 把 $DMG_NAME 上传 GitHub release；朋友安装指南见 README。"

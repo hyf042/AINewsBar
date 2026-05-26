@@ -149,10 +149,13 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | **schemaVersion bump → v2-multi-category-r2（第十轮 P1 根因）**| `currentSchemaVersion` 升 r2 强制所有 v2 早期机器再 nuke 一次；规范"任何 v2 内部 schema 演进（含字段 init 默认值变更）都必须 bump r3/r4..." | v2 phase 1 后期 Article.accepted true→nil 等内部演进 schemaVersion 字符串没动 → 跑过 v2 早期版本的机器 guard 跳过 nuke → SwiftData 自动加列 NULL → fetch 时 mandatory field 校验失败（21 行 Article.category=NULL 报错）|
 | performSchemaMigrationIfNeeded throws（第十轮 P1 同型踩坑 #28）| `wipeStoreFiles()` 抽出独立 throws；migration func 改 throws，删 store 失败不推进 schemaVersion 写入；caller makeContainer catch 后下次启动重试 | 旧 catch 只 Log 不 throw → 删 store 失败仍写 schemaVersion → 下次启动 guard 通过，旧库残留持续静默存在 |
 | 启动 sanity sweep（第十轮 P2）| makeContainer 构造成功后 `sanityCheckArticles` fetch 1 条 Article 触发 SwiftData mandatory-field 校验；失败走 wipeStoreFiles 兜底 + 标 firstLaunchAfterSchemaUpgrade | schemaVersion guard 仅检测"主动 schema 变更"，对"SwiftData 自动迁移加列 NULL 让旧行存活"无能为力；sanity sweep 是最后一道防线 |
+| 分发改 DMG + 朋友安装指南（2026-05-26）| build.sh 删 zip 输出改 `hdiutil create -fs HFS+ -format UDZO` 打 DMG；DMG 内 .app + Applications 软链。README 加分步图文：右键打开 → macOS 15 走系统设置→隐私与安全性→"仍要打开"按钮 → fallback `xattr -dr com.apple.quarantine` | zip 解压双击触发 Gatekeeper "已损坏"；ad-hoc 签名 + GitHub 下载附加 `com.apple.quarantine` xattr 必然被拒。无 $99/年 Developer ID 时这是性价比最高的方案；DMG 视觉像"正经安装包"且 macOS Sequoia 的"仍要打开"按钮已成稳定路径 |
 
 ---
 
 ## 构建 & 运行
+
+**开发期（debug 快速迭代）：**
 
 ```bash
 cd /Users/hyf042/Projects/AINewsBar
@@ -162,6 +165,15 @@ cp .build/debug/AINewsBar build/AINewsBar.app/Contents/MacOS/AINewsBar
 codesign --sign - --force build/AINewsBar.app
 build/AINewsBar.app/Contents/MacOS/AINewsBar &
 ```
+
+**发版（DMG 分发给朋友）：**
+
+```bash
+./scripts/build.sh              # 自动跑 release build + ad-hoc 签名 + 打 DMG
+# 输出: build/AINewsBar-x.y.z.dmg（1.0 MB 左右）
+```
+
+发版前手动 bump `scripts/build.sh` 的 `VERSION` 与 `BUILD_NUMBER`。DMG 内部含 .app + Applications 软链。朋友首次安装需走 README "朋友友好指南"右键打开授权流程。
 
 > **不要用 `open` 命令**（某些状态下静默失败，踩坑 #3）；**不要直接跑裸二进制**（MenuBarExtra 依赖 bundle 上下文，#4）。
 

@@ -46,8 +46,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Schema 版本与 Migration
 
     /// 当前 schema 版本。每次 schema 不兼容变更时升版本号触发主动全清。
+    ///
     /// v2-multi-category (2026-05-24)：引入 Category 维度，Article/Feed/UsageRecord 加字段。
-    private static let currentSchemaVersion = "v2-multi-category"
+    ///
+    /// **v2-multi-category-r2 (2026-05-26)** — 第十轮 review，根因修复：
+    /// v2 phase 1 后 v2 内部演进期（539da46 → a11a8f5）字段 init 默认值改过若干次
+    /// （Article.accepted true→nil 等），SwiftData 自动迁移会保留旧行加列默认 NULL。
+    /// 旧字符串 "v2-multi-category" 让所有跑过早期 v2 的机器 guard 跳过 → 21 行残留
+    /// Article.category=NULL，fetch 时 mandatory field 校验失败 / 业务静默失败。
+    /// bump 到 r2 强制全部早期机器再 nuke 一次。后续任何 v2 内部 schema 变更（含改默认值）
+    /// 都应跟着升 r3 / r4，把"升 schemaVersion"列入 schema 变更必做项。
+    private static let currentSchemaVersion = "v2-multi-category-r2"
 
     /// 永远保留的 prefs key（schema migration 不清理）。
     /// API Key + Model：避免用户每次升级重填。
@@ -57,33 +66,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         "com.ainewsbar.model",
     ]
 
-    /// schema 版本不匹配时主动清理：
-    /// 1. 删 SwiftData store（schema 不兼容）
-    /// 2. 用白名单方式清理 `com.ainewsbar.` 前缀业务 key（保留 API Key + Model）
-    /// 3. 非 `com.ainewsbar.` 前缀的 key（如 launchAtLogin / SwiftUI 状态）自然保留
-    /// 4. 标记首次启动（启动刷新据此仅触发 AI cat）
-    /// 用户决策：无数据迁移需求，全清接受。
-    private static func performSchemaMigrationIfNeeded() {
-        let defaults = UserDefaults.standard
-        let stored = defaults.string(forKey: "schemaVersion")
-        guard stored != currentSchemaVersion else { return }
-
-        Log.write("[Migration] schema version mismatch: \(stored ?? "nil") → \(currentSchemaVersion), wiping...")
-
-        // 1. 删 SwiftData store（含 -shm / -wal sidecars）
-        // M4: 失败不能静默 —— 权限/锁文件被占用导致删除失败时，下面 ModelContainer
-        // 用旧 schema 数据库继续 → 抛错 → fallback in-memory（用户数据丢失）。
-        // 至少记录失败原因供 Console.app 排查。
+    /// 删 store 文件（含 -shm / -wal sidecar）。fileNoSuchFile 不报错（sidecar 可能不存在）；
+    /// 其他错误（权限、IO 锁）抛出由 caller 决定是否推进 guard。
+    /// 抽成独立函数让 schemaVersion guard 路径与 makeContainer 二次重建路径复用。
+    private static func wipeStoreFiles() throws {
         for suffix in ["", "-shm", "-wal"] {
             let url = URL.applicationSupportDirectory.appending(path: "default.store\(suffix)")
             do {
                 try FileManager.default.removeItem(at: url)
             } catch CocoaError.fileNoSuchFile {
                 // 正常路径：sidecar 文件不存在
-            } catch {
-                Log.write("[Migration] failed to delete \(url.lastPathComponent): \(error)")
             }
         }
+    }
+
+    /// schema 版本不匹配时主动清理：
+    /// 1. 删 SwiftData store（schema 不兼容）—— 失败必须 throw
+    /// 2. 用白名单方式清理 `com.ainewsbar.` 前缀业务 key（保留 API Key + Model）
+    /// 3. 非 `com.ainewsbar.` 前缀的 key（如 launchAtLogin / SwiftUI 状态）自然保留
+    /// 4. 标记首次启动（启动刷新据此仅触发 AI cat）+ 写新版本号
+    /// 用户决策：无数据迁移需求，全清接受。
+    ///
+    /// **P1 第十轮 review（同型踩坑 #28）**：删 store 失败时**不能**推进
+    /// schemaVersion 写入 —— 否则下次启动 guard 通过，旧库残留持续静默存在。
+    /// 失败抛出由 caller (makeContainer) 决定 fallback（in-memory 或下次重试）。
+    private static func performSchemaMigrationIfNeeded() throws {
+        let defaults = UserDefaults.standard
+        let stored = defaults.string(forKey: "schemaVersion")
+        guard stored != currentSchemaVersion else { return }
+
+        Log.write("[Migration] schema version mismatch: \(stored ?? "nil") → \(currentSchemaVersion), wiping...")
+
+        // 1. 删 store。失败抛出 — 不能让 guard 错误推进。
+        try wipeStoreFiles()
 
         // 2. 白名单清理：删 `com.ainewsbar.` 前缀且非保留项的 key
         // 这样：API Key + Model 保留；旧 digest/recommend 业务 key 清掉；
@@ -96,7 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             removed += 1
         }
 
-        // 3. 写新版本号 + 标记首次启动
+        // 3. 写新版本号 + 标记首次启动（仅 store 删除成功后到达此处）
         defaults.set(currentSchemaVersion, forKey: "schemaVersion")
         defaults.set(true, forKey: "firstLaunchAfterSchemaUpgrade")
 
@@ -105,28 +120,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Container 构造（含迁移失败重建路径 + in-memory fallback）
 
+    /// 启动时 sanity sweep：对 Article 做一次轻量 fetch。
+    /// 目的：捕获 SwiftData 自动迁移留下"旧行 mandatory field=NULL"的隐性损坏
+    /// （schemaVersion guard 漏抓时的最后一道防线）。fetch 阶段 SwiftData 会触发
+    /// NSValidateForMandatoryAttribute 校验失败 → 抛错 → caller wipe + 重建。
+    ///
+    /// 失败 cost：误判会触发一次额外的 store 重建（数据全清），但 schemaVersion
+    /// 不变。考虑非常少见 + 用户数据本来已经损坏，可接受。
+    @MainActor
+    private static func sanityCheckArticles(_ container: ModelContainer) throws {
+        let ctx = ModelContext(container)
+        var desc = FetchDescriptor<Article>()
+        desc.fetchLimit = 1
+        _ = try ctx.fetch(desc)
+    }
+
     private static func makeContainer() -> ModelContainer {
         // 优先做 schema 版本检测；不匹配则主动清 store/prefs，再继续走构造路径
-        performSchemaMigrationIfNeeded()
+        do {
+            try performSchemaMigrationIfNeeded()
+        } catch {
+            // P1：schema migration 失败不写 schemaVersion，下次启动重试。
+            // 继续走 ModelContainer 构造路径（如果旧库与当前 schema 兼容仍可启动；
+            // 不兼容则下面 try ModelContainer 失败进 catch 走 wipeStoreFiles 兜底）。
+            Log.write("[Migration] performSchemaMigrationIfNeeded failed (will retry next launch): \(error)")
+        }
 
         let schema = Schema([Feed.self, Article.self, UsageRecord.self])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
             let c = try ModelContainer(for: schema, configurations: config)
+            // P2 第十轮 review：构造成功不代表数据完整。SwiftData 自动迁移可能让旧行
+            // mandatory-field=NULL 通过 schema check；fetch 时才校验。主动 fetch 1 条
+            // 触发校验，失败走重建路径。
+            try MainActor.assumeIsolated {
+                try sanityCheckArticles(c)
+            }
             Log.write("ModelContainer created OK")
             return c
         } catch {
-            // 迁移失败：删旧库重建（今日文章下次 refresh 重新抓取即可）
-            Log.write("ModelContainer failed, resetting store: \(error)")
-            for suffix in ["", "-shm", "-wal"] {
-                let url = URL.applicationSupportDirectory.appending(path: "default.store\(suffix)")
-                do {
-                    try FileManager.default.removeItem(at: url)
-                } catch CocoaError.fileNoSuchFile {
-                    // 正常路径
-                } catch {
-                    Log.write("[Migration] reset failed to delete \(url.lastPathComponent): \(error)")
-                }
+            // 构造或 sanity 失败：删旧库重建（今日文章下次 refresh 重新抓取即可）
+            Log.write("ModelContainer or sanity failed, resetting store: \(error)")
+            do {
+                try wipeStoreFiles()
+                // 兜底重建路径触发了 wipe，意味着旧 store 被强制清掉 → 视同 schema 升级
+                // 让 BuiltInFeeds 重新同步全量内置源 + 启动 refresh 只跑 AI cat
+                UserDefaults.standard.set(true, forKey: "firstLaunchAfterSchemaUpgrade")
+            } catch {
+                Log.write("[Migration] reset failed to delete store: \(error)")
             }
             do {
                 let c = try ModelContainer(for: schema, configurations: config)

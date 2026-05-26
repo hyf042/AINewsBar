@@ -31,6 +31,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-25 深夜 (六) | 第七轮 review 4 项：FilterPipeline 拆 transient vs classification（财报永久 reject 漏洞）/ Filter 后补 postUnreadCount / 检测可用性按钮不动 globalAIError / BuiltInFeeds 插入扫全表去重；测试 219 → 222 | `456aeeb` |
 | 2026-05-25 深夜 (七) | 第八轮 review 4 项：ArticleSnapshot 按 publishedAt 倒序排序 / 删源后清 per-cat digest+recommend 缓存 / saveAndCheck 失败不污染 globalAIError / parseRecommendResponse 改正则提取（支持 "1. 2. 3." 等格式）；测试 222 → 227 + 踩坑 #39 | `82889ae` |
 | 2026-05-25 深夜 (八) | **v2.0.1 发布**：8 轮 review 累计修复打包 release（含 P1 财报永久 reject 漏洞）；build.sh 加 BUILD_NUMBER 变量避免手动改 Info.plist 与脚本漂移 | `v2.0.1` |
+| 2026-05-26 早 | 第九轮 review 3 项：skipFilter 开启清旧 pending（FeedSettingsStore.persistSkipFilterChange）/ AddFeedSheet 统一 trim / parseRecommendResponse 末尾冒号优先；测试 227 → 232 | `9e5b81d` |
+| 2026-05-26 早 (二) | **第十轮 P1 schema migration 根因修复**：bump schemaVersion v2-multi-category-r2 / performSchemaMigrationIfNeeded throws 删 store 失败不推进 guard / 启动 sanity sweep + 踩坑 #40 | (本次) |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -141,6 +143,12 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 删源后清 per-cat digest+recommend 缓存（第八轮 P2）| RefreshService 新增 `invalidatePerCatCache(for:)` 公开方法；FeedRowView.handleToggle / FeedsSettingsView.deleteCustomFeeds 成功路径调用 | 旧路径删源后只更 badge；digest 文本可能含已删源标题；recommendedArticleIDs 非空让 auto refresh 不重生（陈旧永留） |
 | saveAndCheck 失败不污染 globalAIError（第八轮 P3）| `saveAndCheck` 失败 catch 删 `globalAIError = ...` 这一行；只更新本页 checkStatus | 持久化失败时 prefs 未变，主 UI 反映的应该是"当前持久化配置"，不该被未保存候选输入污染 |
 | parseRecommendResponse 改正则提取（第八轮 P3）| 旧 `components(separatedBy:)` 改 `NSRegularExpression("\d+")` 匹配所有数字串；空 prompt cap 用 `count > 0 && totalCount > 0` guard | 旧实现遇 "1. 2. 3."/"[1] [2]"/"推荐：1,3,7" 等模型啰嗦输出会 split 后整数解析失败返空；正则提取数字鲁棒得多 |
+| skipFilter 开启清旧 pending（第九轮 P2）| `FeedSettingsStore.persistSkipFilterChange` 开启时 fetch `feedID==X && accepted==nil` flip 为 true；caller 据返回 count 调 postUnreadCount + invalidatePerCatCache；关闭不反向重筛 | 旧路径 toggle 只存 feed.skipFilter；旧 pending 仍 accepted=nil → @Query 隐藏 + FilterPipeline 仍抓出来烧 token，违反"纯净源"语义 |
+| AddFeedSheet 统一 trim（第九轮 P3）| 顶层 trimmedURL/trimmedTitle computed property；disabled gate / validateAndAdd fetch / 去重比对 / 存盘四路径全部用 trimmed 值 | 旧路径空判用原值、validate 用原值、save 才 trim → "   " 标题能通过，"校验失败但仍要添加"路径强制存 trim(X) 与校验路径不一致 |
+| parseRecommendResponse 末尾冒号优先（第九轮 P3）| 优先取最后 `:` / `：` 后段 extractRecommendIds，空再 fallback 全文；保留无冒号格式兼容 | 旧全文正则吞解释里数字（"推荐**5**篇：1,2,3,4,5" → [5,1,2,3,4] 顺序错乱）；末尾冒号是"解释:结果"模式的稳定分隔 |
+| **schemaVersion bump → v2-multi-category-r2（第十轮 P1 根因）**| `currentSchemaVersion` 升 r2 强制所有 v2 早期机器再 nuke 一次；规范"任何 v2 内部 schema 演进（含字段 init 默认值变更）都必须 bump r3/r4..." | v2 phase 1 后期 Article.accepted true→nil 等内部演进 schemaVersion 字符串没动 → 跑过 v2 早期版本的机器 guard 跳过 nuke → SwiftData 自动加列 NULL → fetch 时 mandatory field 校验失败（21 行 Article.category=NULL 报错）|
+| performSchemaMigrationIfNeeded throws（第十轮 P1 同型踩坑 #28）| `wipeStoreFiles()` 抽出独立 throws；migration func 改 throws，删 store 失败不推进 schemaVersion 写入；caller makeContainer catch 后下次启动重试 | 旧 catch 只 Log 不 throw → 删 store 失败仍写 schemaVersion → 下次启动 guard 通过，旧库残留持续静默存在 |
+| 启动 sanity sweep（第十轮 P2）| makeContainer 构造成功后 `sanityCheckArticles` fetch 1 条 Article 触发 SwiftData mandatory-field 校验；失败走 wipeStoreFiles 兜底 + 标 firstLaunchAfterSchemaUpgrade | schemaVersion guard 仅检测"主动 schema 变更"，对"SwiftData 自动迁移加列 NULL 让旧行存活"无能为力；sanity sweep 是最后一道防线 |
 
 ---
 
@@ -335,3 +343,18 @@ v2: 27 个 = 11 AI + 8 财报 + 8 新闻。完整列表见 `Sources/AINewsBar/Se
 
 ### 39. SwiftData ModelContainer 在测试中被 `let (_, context) = TestContainer.make()` 立即 ARC 释放 → context.insert SIGTRAP
 **根因**：`(_, context)` 让 container 在表达式结束后立即被 ARC 释放；mainContext 底层 store 是 container 拥有的，container 释放后 context 调用任何方法（insert/save/fetch）触发 trap，xctest 报 "exited with unexpected signal code 5"，没有 stack trace 也没有断言失败信息。**修复**：`let (container, context) = TestContainer.make(); _ = container`（或挪到 setUp 让 storedProperty 保留）。心得：SwiftData ModelContext 的有效寿命强依赖 ModelContainer 的 strong reference，不像 Core Data 有显式 persistentStoreCoordinator weak/strong 选择。命名绑定别用 `_` 丢掉 container。
+
+### 40. schemaVersion guard 字符串"颗粒度太粗 + 删 store 失败仍推进版本号"导致 v2 内部演进留 NULL 行 → fetch mandatory field 失败
+**根因**：双重缺陷叠加。
+1. `currentSchemaVersion = "v2-multi-category"` 这个字符串只标识"v1→v2 一次大迁移"。v2 phase 1 之后的内部演进期（539da46 → a11a8f5）若干次字段 init 默认值变更（如 `Article.accepted` true→nil）改变了"新建 Article 行的语义"，但**没有触发 schema 物理结构变更**。SwiftData 自动迁移在同 schemaVersion 内能透明加列；问题在旧行新加列的值就是 NULL。新代码 `var category: String`（非可选）拿这个 NULL row 做 fetch 时触发 NSValidateForMandatoryAttribute 校验失败 → 静默或局部崩溃。受害机器：所有跑过 v2 早期版本、再拉到当前 head 的本地环境（21 行残留 Article.category=NULL）。
+2. `performSchemaMigrationIfNeeded` 删 store 文件失败时只 `Log.write` 不 throw → 函数继续走到 `defaults.set(currentSchemaVersion, forKey: "schemaVersion")` → 下次启动 guard 通过 → 旧库残留与新 schemaVersion 共存。同型踩坑 #28（"清理/reset 类操作失败不能让 guard 错误推进"）。
+
+**修复**：
+- bump `currentSchemaVersion` 到 `"v2-multi-category-r2"` 强制所有早期机器再 nuke 一次（quick fix）
+- 抽 `wipeStoreFiles() throws` 独立函数；`performSchemaMigrationIfNeeded() throws` 删 store 失败抛出，caller `makeContainer` 不写 schemaVersion 下次启动重试（防同型再发）
+- 加 `sanityCheckArticles(_:)` 启动期 fetch 1 条 Article，触发 SwiftData mandatory-field 校验；失败走 wipeStoreFiles 兜底重建 + 标 firstLaunchAfterSchemaUpgrade（最后一道防线）
+
+**心得**：
+- SwiftData 自动迁移加列默认 NULL 是"隐性 schema 演进"，开发者觉得只是改了 init default 不会破坏数据，实际 SQLite 行物理层已经分歧。**任何**对 @Model 字段（特别是非可选字段）的改动都应该当作 schema 不兼容变更对待，跟着 bump schemaVersion。
+- "guard 字段 + 副作用操作"组合中，副作用失败必须中断 guard 推进；只 Log 是不够的（log 是观测，不是拦截）。踩坑 #28 已经在 cleanupOlderThan 类场景说过同样的话，这次复现在 schema migration 场景。
+- "ModelContainer 构造成功"≠"数据完整"。SwiftData 是 lazy validation：fetch 时才校验 mandatory 字段。生产代码不能假设构造成功就是数据可用，启动期主动 fetch 一次代价极小、价值显著。

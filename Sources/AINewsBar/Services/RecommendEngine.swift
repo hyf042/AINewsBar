@@ -14,6 +14,12 @@ struct RecommendEngine {
 
     /// 返回 nil = 候选不足（数据完整性保护）；throws = AI 调用失败
     /// per-cat recommendCount 来自 CategoryConfig；caller 不传，避免与 prompt/parser cap 漂移
+    ///
+    /// **候选必须有摘要**（第十二轮 P2 review）：旧实现用 `snapshot.all`，混入 nil-summary
+    /// 文章。自动路径靠 RefreshService 的 coverage gate 兜底（第十一轮 P2），但 force path
+    /// `forceRegenerateRecommend` 不过 coverage gate 直接调 Engine —— 5 篇文章只 3 篇有摘要
+    /// 时用户点"刷新推荐"仍烧 token 推 nil-summary 候选。本层把 `snapshot.summarized` 作为
+    /// 唯一候选源，阈值与喂给 AI 的 items 同源，所有 caller 自动得到保护。
     func run(
         snapshot: ArticleSnapshot,
         category: AINewsBar.Category,
@@ -21,12 +27,13 @@ struct RecommendEngine {
         model: String
     ) async throws -> Outcome? {
         let count = CategoryConfig.for(category).recommendCount
+        let candidates = snapshot.summarized
         // 与 BailianService.recommendArticles 内部 guard 阈值保持一致（count 篇）
         // 前置 guard 避免无谓 LLM 调用；阈值与 UI 候选不足文案同源
-        guard snapshot.all.count >= count else { return nil }
+        guard candidates.count >= count else { return nil }
 
         let (ids, usage) = try await ai.recommendArticles(
-            snapshot.all, count: count,
+            candidates, count: count,
             category: category, apiKey: apiKey, model: model
         )
         // 最低有效阈值：要求至少返回 count 的一半（向上取整），低于此判定 AI 输出退化
@@ -34,11 +41,11 @@ struct RecommendEngine {
         guard ids.count >= minimumValid else {
             throw BailianError.malformedResponse(reason: "推荐响应有效序号不足（\(ids.count)/\(count)）")
         }
-        Log.write("[Recommend][\(category.rawValue)] picked \(ids.count) from \(snapshot.all.count) articles (target=\(count))")
+        Log.write("[Recommend][\(category.rawValue)] picked \(ids.count) from \(candidates.count) summarized articles (target=\(count))")
         return Outcome(
             ids: ids,
             generatedAt: Date(),
-            articleCount: snapshot.summarizedCount,
+            articleCount: candidates.count,
             usage: usage
         )
     }

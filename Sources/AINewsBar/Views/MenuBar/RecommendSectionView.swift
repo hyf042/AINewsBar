@@ -34,9 +34,16 @@ struct RecommendSectionView: View {
     /// 走 CategoryConfig.recommendCount 保证 prompt / parser cap / UI threshold 一致。
     private var recommendThreshold: Int { CategoryConfig.for(category).recommendCount }
 
+    /// 第十二轮 P2 review：候选数按"有摘要"算，与 RecommendEngine 一致。
+    /// 旧实现按 articles.count 显示，5 篇里只 3 篇有摘要时 UI 仍说"候选够了"，
+    /// 但 Engine 实际不调 AI（summarized < 5），永远 placeholder 像 bug。
+    private var summarizedCount: Int {
+        articles.filter { $0.aiSummary != nil }.count
+    }
+
     var body: some View {
         let loading = picks.isEmpty
-        let candidateShort = articles.count < recommendThreshold
+        let candidateShort = summarizedCount < recommendThreshold
         VStack(alignment: .leading, spacing: 0) {
             header(loading: loading)
             if loading {
@@ -56,7 +63,7 @@ struct RecommendSectionView: View {
     /// 候选不足时显示文案而非 N 个占位条（避免永远 placeholder 像 bug）
     private var candidateShortFootnote: some View {
         HStack {
-            Text("候选不足，需 ≥\(recommendThreshold) 篇文章 (当前 \(articles.count))")
+            Text("候选不足，需 ≥\(recommendThreshold) 篇有摘要文章 (当前 \(summarizedCount))")
                 .font(Typography.caption)
                 .foregroundStyle(TextColor.tertiary)
             Spacer()

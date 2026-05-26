@@ -34,7 +34,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-26 早 | 第九轮 review 3 项：skipFilter 开启清旧 pending（FeedSettingsStore.persistSkipFilterChange）/ AddFeedSheet 统一 trim / parseRecommendResponse 末尾冒号优先；测试 227 → 232 | `9e5b81d` |
 | 2026-05-26 早 (二) | **第十轮 P1 schema migration 根因修复**：bump schemaVersion v2-multi-category-r2 / performSchemaMigrationIfNeeded throws 删 store 失败不推进 guard / 启动 sanity sweep + 踩坑 #40 | `3b9f7c2` |
 | 2026-05-26 早 (三) | 分发流程改 DMG + 朋友安装指南（build.sh hdiutil 打包 / README 4 步分步指南） | `2e5f71e` |
-| 2026-05-26 午 | 第十一轮 review 4 项：兜底 wipe 也写 schemaVersion (markSchemaMigrationComplete helper) / coverage gate 同时挡 recommend 与 digest / sanity sweep 扩到三 model / UsageRecorder 失败 rollback；测试 223 → 224 | (本次) |
+| 2026-05-26 午 | 第十一轮 review 4 项：兜底 wipe 也写 schemaVersion (markSchemaMigrationComplete helper) / coverage gate 同时挡 recommend 与 digest / sanity sweep 扩到三 model / UsageRecorder 失败 rollback；测试 223 → 224 | `144e78b` |
+| 2026-05-26 下午 | 第十二轮 review 3 项：推荐候选改 snapshot.summarized（force path 一致兜底） / APISettingsView 统一 trim / APISettingsView checkStatus onChange 重置；测试 224 → 226 | (本次) |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -156,6 +157,9 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | coverage gate 同时挡 recommend（第十一轮 P2）| 旧 `if !coverage` 只挡 digest；改为 recommend 块也独立 `if !coverage` skip。RecommendEngine 用 snapshot.all 不过滤 summary，coverage 不足意味 snapshot 含 nil-summary 文章 | 产品规则"摘要质量不足就不要生成派生内容"应同时覆盖推荐与日报；5 篇文章只成功 3 篇时旧路径仍跑推荐，候选列表混 nil 摘要让 AI 选不出有信息量的推荐 |
 | sanity sweep 扩到三 model（第十一轮 P3）| sanityCheckSchema 对 Article / Feed / UsageRecord 各做一次 fetchLimit=1，任一失败走兜底重建路径 | 旧只 fetch Article 漏检 Feed / UsageRecord；Feed.category 坏掉时 Article sweep 通过，BuiltInFeeds.syncInto 才业务路径失败 → banner + 不自动刷新，而非自动重建。坏库全清策略要求 sweep 覆盖全 schema |
 | UsageRecorder 失败 rollback（第十一轮 P3）| record() 与 cleanupOlderThan() 中 safeSave 失败时 `context.rollback()`；非关键路径失败可丢弃，但不能让脏 insert/delete 留在 ModelContext 里被后续业务 save 一起落盘 | telemetry 是非关键路径采用 tolerant safeSave，但旧实现失败后不清 pending changes；后续 commitSummaries / postUnreadCount 等业务路径 save 时会把本该丢弃的 telemetry 落盘，污染"今日 token 用量" UI |
+| RecommendEngine candidates = snapshot.summarized（第十二轮 P2）| 阈值与喂给 AI 的 items 统一从 `snapshot.summarized` 取；UI RecommendSectionView 候选不足文案按 `articles.filter { aiSummary != nil }.count` 显示 | 旧 `snapshot.all` 让 force 路径绕过 coverage gate：5 篇文章 3 篇有摘要时用户点"刷新推荐"仍烧 token 推 nil-summary 候选。新设计 candidates 同源所有 caller（auto / force / 手动）自动有保护，UI 与 Engine 用同一阈值不漂移 |
+| APISettingsView 统一 trim（第十二轮 P3）| `trimmedAPIKey` / `trimmedCustomModel` / `effectiveModel` computed 包 trim；disabled gate / saveAndCheck / checkConnection / prefs 写入全部走 trimmed 值 | 用户从网页/聊天复制 API key 常带尾部空白/换行 → 旧实现 testConnection 凭原值 HTTP 401（"Authorization: Bearer sk-...\n"），保存路径也把脏值写进 UserDefaults 污染主流程 |
+| APISettingsView checkStatus onChange 重置（第十二轮 P3）| `.onChange(of: apiKey/customModel/selectedModel)` 重置 `checkStatus = .idle`；useCustomModel toggle 已有同样行为 | 检测成功后用户改输入 UI 仍显示"API Key 和模型均可用"误导用户；状态必须与当前 form 输入同步 |
 
 ---
 

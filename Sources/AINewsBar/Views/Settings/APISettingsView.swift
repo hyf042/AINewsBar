@@ -16,8 +16,19 @@ struct APISettingsView: View {
         ("MiniMax", ["MiniMax-M2.5"])
     ]
 
+    /// 第十二轮 P3：输入边界统一 trim。用户从网页/聊天复制 key 常带尾部空白/换行，
+    /// 旧实现 testConnection 用原值会莫名 HTTP 401（DashScope 拒绝 `Authorization: Bearer sk-...\n`），
+    /// 保存路径也把原值写进 UserDefaults 污染主流程。所有 caller 走这两个 computed property。
+    /// selectedModel 来自 Picker 固定值不必 trim，但 effectiveModel 仍走 trim 保统一语义。
+    private var trimmedAPIKey: String {
+        apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var trimmedCustomModel: String {
+        customModel.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     private var effectiveModel: String {
-        useCustomModel ? customModel : selectedModel
+        let raw = useCustomModel ? trimmedCustomModel : selectedModel
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var isChecking: Bool {
@@ -68,16 +79,21 @@ struct APISettingsView: View {
                 HStack {
                     Button("检测可用性") { Task { await checkConnection() } }
                         .tint(BrandColor.accent)
-                        .disabled(apiKey.isEmpty || effectiveModel.isEmpty || isChecking)
+                        .disabled(trimmedAPIKey.isEmpty || effectiveModel.isEmpty || isChecking)
                     Spacer()
                     Button("保存") { Task { await saveAndCheck() } }
                         .buttonStyle(.borderedProminent)
-                        .disabled(apiKey.isEmpty)
+                        .disabled(trimmedAPIKey.isEmpty)
                 }
             }
         }
         .formStyle(.grouped)
         .onAppear { loadSettings() }
+        // 第十二轮 P3：输入变化即重置 checkStatus，避免"检测成功后改了输入仍显示已可用"误导。
+        // useCustomModel 已在 Section 内有 onChange；这里补齐另三个输入源。
+        .onChange(of: apiKey) { _, _ in checkStatus = .idle }
+        .onChange(of: customModel) { _, _ in checkStatus = .idle }
+        .onChange(of: selectedModel) { _, _ in checkStatus = .idle }
     }
 
     @ViewBuilder
@@ -124,13 +140,16 @@ struct APISettingsView: View {
     /// 一个未保存的候选输入污染。失败只更新本页 checkStatus，与 checkConnection 对齐。
     @MainActor
     private func saveAndCheck() async {
-        guard !apiKey.isEmpty, !effectiveModel.isEmpty else { return }
+        // 第十二轮 P3：所有 caller 走 trimmed 值，避免空白进 testConnection / prefs。
+        let key = trimmedAPIKey
+        let model = effectiveModel
+        guard !key.isEmpty, !model.isEmpty else { return }
         checkStatus = .checking
         do {
-            try await BailianService.shared.testConnection(apiKey: apiKey, model: effectiveModel)
+            try await BailianService.shared.testConnection(apiKey: key, model: model)
             // 验证通过 → 持久化 + 触发主流程
-            PreferencesService.shared.saveAPIKey(apiKey)
-            PreferencesService.shared.saveModel(effectiveModel)
+            PreferencesService.shared.saveAPIKey(key)
+            PreferencesService.shared.saveModel(model)
             checkStatus = .success(1)
             // onboarding 路径：清 credential 错误 + 顺序刷新三 cat
             let service = refreshService
@@ -152,10 +171,12 @@ struct APISettingsView: View {
     /// 主 UI 状态只能由实际运行中的 refresh / saveAndCheck 持久化路径来改。
     @MainActor
     private func checkConnection() async {
-        guard !apiKey.isEmpty, !effectiveModel.isEmpty else { return }
+        let key = trimmedAPIKey
+        let model = effectiveModel
+        guard !key.isEmpty, !model.isEmpty else { return }
         checkStatus = .checking
         do {
-            try await BailianService.shared.testConnection(apiKey: apiKey, model: effectiveModel)
+            try await BailianService.shared.testConnection(apiKey: key, model: model)
             checkStatus = .success(1)
         } catch {
             checkStatus = .failure(error.localizedDescription)

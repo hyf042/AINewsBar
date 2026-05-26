@@ -74,10 +74,35 @@ final class RecommendEngineTests: XCTestCase {
     }
 
     func testOutcomeCarriesSummarizedCount() async throws {
-        let s = snap(count: 6, summarized: 4)
+        // 第十二轮 P2：candidates 改为 snapshot.summarized；6 篇 total / 5 篇有摘要 → 调 AI
+        let s = snap(count: 6, summarized: 5)
         let outcome = try await engine.run(snapshot: s,
                                             category: .ai,
                                             apiKey: "k", model: "m")
-        XCTAssertEqual(outcome?.articleCount, 4, "articleCount 应为有摘要的数量")
+        XCTAssertEqual(outcome?.articleCount, 5, "articleCount 应为有摘要的数量")
+    }
+
+    /// 第十二轮 P2：候选必须有摘要。10 篇 total 但只 4 篇有摘要 → 不调 AI。
+    /// 旧实现 `snapshot.all.count=10 >= 5` 通过，会把 nil-summary 文章混给 AI 跑低质推荐。
+    func testReturnsNilWhenSummarizedBelowThresholdEvenIfTotalEnough() async throws {
+        let s = snap(count: 10, summarized: 4)
+        let outcome = try await engine.run(snapshot: s,
+                                            category: .ai,
+                                            apiKey: "k", model: "m")
+        XCTAssertNil(outcome, "summarized<5 时即使 total>=5 也不应调 AI")
+        XCTAssertEqual(ai.recommendCallCount, 0)
+    }
+
+    /// 喂给 AI 的 items 必须只含有摘要的（验证 candidates 同源）
+    func testOnlyFeedsSummarizedToAI() async throws {
+        let s = snap(count: 8, summarized: 6)
+        ai.recommendProvider = { items in
+            // 验证调用时 items 全部带 summary
+            XCTAssertTrue(items.allSatisfy { $0.summary != nil },
+                          "candidate 必须只含有摘要的文章")
+            return Array(items.prefix(5).map(\.id))
+        }
+        _ = try await engine.run(snapshot: s, category: .ai, apiKey: "k", model: "m")
+        XCTAssertEqual(ai.recommendCallCount, 1)
     }
 }

@@ -35,7 +35,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-26 早 (二) | **第十轮 P1 schema migration 根因修复**：bump schemaVersion v2-multi-category-r2 / performSchemaMigrationIfNeeded throws 删 store 失败不推进 guard / 启动 sanity sweep + 踩坑 #40 | `3b9f7c2` |
 | 2026-05-26 早 (三) | 分发流程改 DMG + 朋友安装指南（build.sh hdiutil 打包 / README 4 步分步指南） | `2e5f71e` |
 | 2026-05-26 午 | 第十一轮 review 4 项：兜底 wipe 也写 schemaVersion (markSchemaMigrationComplete helper) / coverage gate 同时挡 recommend 与 digest / sanity sweep 扩到三 model / UsageRecorder 失败 rollback；测试 223 → 224 | `144e78b` |
-| 2026-05-26 下午 | 第十二轮 review 3 项：推荐候选改 snapshot.summarized（force path 一致兜底） / APISettingsView 统一 trim / APISettingsView checkStatus onChange 重置；测试 224 → 226 | (本次) |
+| 2026-05-26 下午 | 第十二轮 review 3 项：推荐候选改 snapshot.summarized（force path 一致兜底） / APISettingsView 统一 trim / APISettingsView checkStatus onChange 重置；测试 224 → 226 | `3f157aa` |
+| 2026-05-26 下午 (二) | **v2.0.2 发布**：第 9-12 轮 review 累计修复打包 release（含 P1 schemaVersion v2-multi-category-r2 强制 nuke + DMG 分发） | `v2.0.2` |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 

@@ -32,7 +32,9 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-25 深夜 (七) | 第八轮 review 4 项：ArticleSnapshot 按 publishedAt 倒序排序 / 删源后清 per-cat digest+recommend 缓存 / saveAndCheck 失败不污染 globalAIError / parseRecommendResponse 改正则提取（支持 "1. 2. 3." 等格式）；测试 222 → 227 + 踩坑 #39 | `82889ae` |
 | 2026-05-25 深夜 (八) | **v2.0.1 发布**：8 轮 review 累计修复打包 release（含 P1 财报永久 reject 漏洞）；build.sh 加 BUILD_NUMBER 变量避免手动改 Info.plist 与脚本漂移 | `v2.0.1` |
 | 2026-05-26 早 | 第九轮 review 3 项：skipFilter 开启清旧 pending（FeedSettingsStore.persistSkipFilterChange）/ AddFeedSheet 统一 trim / parseRecommendResponse 末尾冒号优先；测试 227 → 232 | `9e5b81d` |
-| 2026-05-26 早 (二) | **第十轮 P1 schema migration 根因修复**：bump schemaVersion v2-multi-category-r2 / performSchemaMigrationIfNeeded throws 删 store 失败不推进 guard / 启动 sanity sweep + 踩坑 #40 | (本次) |
+| 2026-05-26 早 (二) | **第十轮 P1 schema migration 根因修复**：bump schemaVersion v2-multi-category-r2 / performSchemaMigrationIfNeeded throws 删 store 失败不推进 guard / 启动 sanity sweep + 踩坑 #40 | `3b9f7c2` |
+| 2026-05-26 早 (三) | 分发流程改 DMG + 朋友安装指南（build.sh hdiutil 打包 / README 4 步分步指南） | `2e5f71e` |
+| 2026-05-26 午 | 第十一轮 review 4 项：兜底 wipe 也写 schemaVersion (markSchemaMigrationComplete helper) / coverage gate 同时挡 recommend 与 digest / sanity sweep 扩到三 model / UsageRecorder 失败 rollback；测试 223 → 224 | (本次) |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -150,6 +152,10 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | performSchemaMigrationIfNeeded throws（第十轮 P1 同型踩坑 #28）| `wipeStoreFiles()` 抽出独立 throws；migration func 改 throws，删 store 失败不推进 schemaVersion 写入；caller makeContainer catch 后下次启动重试 | 旧 catch 只 Log 不 throw → 删 store 失败仍写 schemaVersion → 下次启动 guard 通过，旧库残留持续静默存在 |
 | 启动 sanity sweep（第十轮 P2）| makeContainer 构造成功后 `sanityCheckArticles` fetch 1 条 Article 触发 SwiftData mandatory-field 校验；失败走 wipeStoreFiles 兜底 + 标 firstLaunchAfterSchemaUpgrade | schemaVersion guard 仅检测"主动 schema 变更"，对"SwiftData 自动迁移加列 NULL 让旧行存活"无能为力；sanity sweep 是最后一道防线 |
 | 分发改 DMG + 朋友安装指南（2026-05-26）| build.sh 删 zip 输出改 `hdiutil create -fs HFS+ -format UDZO` 打 DMG；DMG 内 .app + Applications 软链。README 加分步图文：右键打开 → macOS 15 走系统设置→隐私与安全性→"仍要打开"按钮 → fallback `xattr -dr com.apple.quarantine` | zip 解压双击触发 Gatekeeper "已损坏"；ad-hoc 签名 + GitHub 下载附加 `com.apple.quarantine` xattr 必然被拒。无 $99/年 Developer ID 时这是性价比最高的方案；DMG 视觉像"正经安装包"且 macOS Sequoia 的"仍要打开"按钮已成稳定路径 |
+| markSchemaMigrationComplete helper（第十一轮 P2）| 抽出"清业务 prefs + 写 schemaVersion + 写 firstLaunch flag" helper；performSchemaMigrationIfNeeded 主路径与 makeContainer 兜底 wipe 成功后都调用 | 旧兜底路径只 set firstLaunchAfterSchemaUpgrade 不写 schemaVersion → 下次启动 guard 仍判 mismatch 又触发一次清库；也不清业务 prefs → 空库 + 旧 prefs 显示"已生成日报"指向已删文章。两路径必须等价 |
+| coverage gate 同时挡 recommend（第十一轮 P2）| 旧 `if !coverage` 只挡 digest；改为 recommend 块也独立 `if !coverage` skip。RecommendEngine 用 snapshot.all 不过滤 summary，coverage 不足意味 snapshot 含 nil-summary 文章 | 产品规则"摘要质量不足就不要生成派生内容"应同时覆盖推荐与日报；5 篇文章只成功 3 篇时旧路径仍跑推荐，候选列表混 nil 摘要让 AI 选不出有信息量的推荐 |
+| sanity sweep 扩到三 model（第十一轮 P3）| sanityCheckSchema 对 Article / Feed / UsageRecord 各做一次 fetchLimit=1，任一失败走兜底重建路径 | 旧只 fetch Article 漏检 Feed / UsageRecord；Feed.category 坏掉时 Article sweep 通过，BuiltInFeeds.syncInto 才业务路径失败 → banner + 不自动刷新，而非自动重建。坏库全清策略要求 sweep 覆盖全 schema |
+| UsageRecorder 失败 rollback（第十一轮 P3）| record() 与 cleanupOlderThan() 中 safeSave 失败时 `context.rollback()`；非关键路径失败可丢弃，但不能让脏 insert/delete 留在 ModelContext 里被后续业务 save 一起落盘 | telemetry 是非关键路径采用 tolerant safeSave，但旧实现失败后不清 pending changes；后续 commitSummaries / postUnreadCount 等业务路径 save 时会把本该丢弃的 telemetry 落盘，污染"今日 token 用量" UI |
 
 ---
 

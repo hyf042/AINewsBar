@@ -295,6 +295,30 @@ final class RefreshServiceTests: XCTestCase {
         XCTAssertGreaterThan(prefs.digestArticleCount, 0)
     }
 
+    // P2 第十一轮 review：coverage gate 必须同时挡 recommend 与 digest。
+    // 5 篇文章中 3 篇摘要成功 2 篇失败 (completionRate=0.6 < 0.8) → recommend 不调用。
+    // 旧实现只挡 digest，会用混 nil-summary 的 snapshot 跑推荐。
+    func testCoverageBelowThresholdSkipsBothRecommendAndDigest() async {
+        let feed = seedFeed("https://f1.com/feed")
+        rss.setSuccess(feed.url, (1...5).map { makeRaw("https://a/\($0)", title: "T\($0)") })
+        // 让 T1 / T2 返回空字符串 → SummaryPipeline 降级为 failure（line 113）
+        // T3 / T4 / T5 返回正常摘要 → completionRate = 3/5 = 0.6 < 0.8（阈值）
+        ai.summaryProvider = { title, _ in
+            if title == "T1" || title == "T2" { return "" }
+            return "summary-of-\(title)"
+        }
+
+        await service.refresh()
+
+        XCTAssertEqual(ai.recommendCallCount, 0, "coverage 不足时 recommend 也应被挡")
+        XCTAssertEqual(ai.digestCallCount, 0, "coverage 不足时 digest 应被挡（既有行为）")
+        if case .unavailable = service.state(for: .ai).aiAvailability {
+            // OK
+        } else {
+            XCTFail("摘要多数失败应 set aiAvailability=.unavailable")
+        }
+    }
+
     func testRefreshHandlesAIErrors() async {
         // 推荐候选阈值升 5：失败路径也需种 ≥ 5 篇才能让 recommend 真正被调用并报错
         let feed = seedFeed("https://f1.com/feed")

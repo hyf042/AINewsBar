@@ -23,7 +23,13 @@ final class UsageRecorder: UsageRecording {
             success: success
         )
         context.insert(record)
-        context.safeSave()
+        // P3 第十一轮 review：失败必须 rollback。telemetry 写入是非关键路径，
+        // 失败丢弃可接受；但 insert 留在 ModelContext 里，后续任意一次成功
+        // save（如 commitSummaries / postUnreadCount 路径）会把本应丢弃的
+        // telemetry 落盘，污染"今日 token 用量"。
+        if !context.safeSave() {
+            context.rollback()
+        }
     }
 
     func cleanupOlderThan(days: Int) {
@@ -36,8 +42,15 @@ final class UsageRecorder: UsageRecording {
         )
         guard !old.isEmpty else { return }
         old.forEach { context.delete($0) }
-        context.safeSave()
-        Log.write("[Usage] cleanup removed \(old.count) records older than \(days)d")
+        // P3 第十一轮 review：save 失败必须 rollback；否则这批 delete 留在
+        // ModelContext 里，下次成功 save 会被一并应用，历史 telemetry 被
+        // 异常清空。
+        if context.safeSave() {
+            Log.write("[Usage] cleanup removed \(old.count) records older than \(days)d")
+        } else {
+            context.rollback()
+            Log.write("[Usage] cleanup save failed, rolled back \(old.count) pending deletes")
+        }
     }
 }
 

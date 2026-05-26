@@ -80,11 +80,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// schema 版本不匹配时主动清理：
-    /// 1. 删 SwiftData store（schema 不兼容）—— 失败必须 throw
-    /// 2. 用白名单方式清理 `com.ainewsbar.` 前缀业务 key（保留 API Key + Model）
-    /// 3. 非 `com.ainewsbar.` 前缀的 key（如 launchAtLogin / SwiftUI 状态）自然保留
-    /// 4. 标记首次启动（启动刷新据此仅触发 AI cat）+ 写新版本号
+    /// store 已被强制清空（或视为重建过）后的善后：清业务 prefs + 写新版本号 + 标 firstLaunch。
+    ///
+    /// **P2 第十一轮 review**：抽出 helper 让两条路径共享 ——
+    /// 1. `performSchemaMigrationIfNeeded` 主动迁移路径（guard mismatch）
+    /// 2. `makeContainer` 兜底重建路径（构造或 sanity 失败 + 兜底 wipe 成功）
+    ///
+    /// 旧实现兜底路径只 set firstLaunchAfterSchemaUpgrade 不写 schemaVersion → 下次启动
+    /// guard 仍判 mismatch → 又触发一次 wipe（用户数据再清一次）。
+    /// 也不清业务 prefs → 空库下 prefs 显示有"已生成的日报"但磁盘没文章 → stale 引用。
+    ///
+    /// 白名单策略：删 `com.ainewsbar.` 前缀且非 preservedPrefsKeys 的 key。
+    /// 这样：API Key + Model 保留；业务 key 清掉；系统 key（launchAtLogin / SwiftUI
+    /// window 状态）因不带前缀自然保留。
+    private static func markSchemaMigrationComplete() {
+        let defaults = UserDefaults.standard
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.ainewsbar.app"
+        let allKeys = defaults.persistentDomain(forName: bundleID)?.keys ?? Dictionary<String, Any>().keys
+        var removed = 0
+        for key in allKeys where key.hasPrefix("com.ainewsbar.") && !preservedPrefsKeys.contains(key) {
+            defaults.removeObject(forKey: key)
+            removed += 1
+        }
+        defaults.set(currentSchemaVersion, forKey: "schemaVersion")
+        defaults.set(true, forKey: "firstLaunchAfterSchemaUpgrade")
+        Log.write("[Migration] mark complete; removed \(removed) old prefs keys; schemaVersion=\(currentSchemaVersion); API Key+Model preserved; firstLaunch flag set")
+    }
+
+    /// schema 版本不匹配时主动清理：删 store + markSchemaMigrationComplete()。
     /// 用户决策：无数据迁移需求，全清接受。
     ///
     /// **P1 第十轮 review（同型踩坑 #28）**：删 store 失败时**不能**推进
@@ -97,42 +120,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Log.write("[Migration] schema version mismatch: \(stored ?? "nil") → \(currentSchemaVersion), wiping...")
 
-        // 1. 删 store。失败抛出 — 不能让 guard 错误推进。
+        // 删 store 失败抛出 — 不能让 markSchemaMigrationComplete 错误推进。
         try wipeStoreFiles()
-
-        // 2. 白名单清理：删 `com.ainewsbar.` 前缀且非保留项的 key
-        // 这样：API Key + Model 保留；旧 digest/recommend 业务 key 清掉；
-        // 非 `com.ainewsbar.` 前缀的系统 key (launchAtLogin / SwiftUI window 状态) 自然保留
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.ainewsbar.app"
-        let allKeys = defaults.persistentDomain(forName: bundleID)?.keys ?? Dictionary<String, Any>().keys
-        var removed = 0
-        for key in allKeys where key.hasPrefix("com.ainewsbar.") && !preservedPrefsKeys.contains(key) {
-            defaults.removeObject(forKey: key)
-            removed += 1
-        }
-
-        // 3. 写新版本号 + 标记首次启动（仅 store 删除成功后到达此处）
-        defaults.set(currentSchemaVersion, forKey: "schemaVersion")
-        defaults.set(true, forKey: "firstLaunchAfterSchemaUpgrade")
-
-        Log.write("[Migration] wipe complete; removed \(removed) old prefs keys; API Key+Model preserved; firstLaunch flag set")
+        markSchemaMigrationComplete()
     }
 
     // MARK: - Container 构造（含迁移失败重建路径 + in-memory fallback）
 
-    /// 启动时 sanity sweep：对 Article 做一次轻量 fetch。
+    /// 启动时 sanity sweep：对 schema 中每个 @Model 做一次轻量 fetch（limit=1）。
     /// 目的：捕获 SwiftData 自动迁移留下"旧行 mandatory field=NULL"的隐性损坏
     /// （schemaVersion guard 漏抓时的最后一道防线）。fetch 阶段 SwiftData 会触发
     /// NSValidateForMandatoryAttribute 校验失败 → 抛错 → caller wipe + 重建。
     ///
+    /// **P3 第十一轮 review**：原只 fetch Article 漏检 Feed / UsageRecord。
+    /// Feed.category 这类 mandatory 字段坏掉时 Article sweep 通过，
+    /// BuiltInFeeds.syncInto 才在业务路径失败 —— 结果是启动 banner +
+    /// 不自动刷新，而不是自动重建。既然策略是"坏库全清"，sweep 应该覆盖全 schema。
+    ///
     /// 失败 cost：误判会触发一次额外的 store 重建（数据全清），但 schemaVersion
     /// 不变。考虑非常少见 + 用户数据本来已经损坏，可接受。
     @MainActor
-    private static func sanityCheckArticles(_ container: ModelContainer) throws {
+    private static func sanityCheckSchema(_ container: ModelContainer) throws {
         let ctx = ModelContext(container)
-        var desc = FetchDescriptor<Article>()
-        desc.fetchLimit = 1
-        _ = try ctx.fetch(desc)
+        var articleDesc = FetchDescriptor<Article>()
+        articleDesc.fetchLimit = 1
+        _ = try ctx.fetch(articleDesc)
+        var feedDesc = FetchDescriptor<Feed>()
+        feedDesc.fetchLimit = 1
+        _ = try ctx.fetch(feedDesc)
+        var usageDesc = FetchDescriptor<UsageRecord>()
+        usageDesc.fetchLimit = 1
+        _ = try ctx.fetch(usageDesc)
     }
 
     private static func makeContainer() -> ModelContainer {
@@ -151,10 +169,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let c = try ModelContainer(for: schema, configurations: config)
             // P2 第十轮 review：构造成功不代表数据完整。SwiftData 自动迁移可能让旧行
-            // mandatory-field=NULL 通过 schema check；fetch 时才校验。主动 fetch 1 条
+            // mandatory-field=NULL 通过 schema check；fetch 时才校验。主动 fetch 全 schema
             // 触发校验，失败走重建路径。
             try MainActor.assumeIsolated {
-                try sanityCheckArticles(c)
+                try sanityCheckSchema(c)
             }
             Log.write("ModelContainer created OK")
             return c
@@ -163,9 +181,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.write("ModelContainer or sanity failed, resetting store: \(error)")
             do {
                 try wipeStoreFiles()
-                // 兜底重建路径触发了 wipe，意味着旧 store 被强制清掉 → 视同 schema 升级
-                // 让 BuiltInFeeds 重新同步全量内置源 + 启动 refresh 只跑 AI cat
-                UserDefaults.standard.set(true, forKey: "firstLaunchAfterSchemaUpgrade")
+                // 兜底 wipe 成功 → markSchemaMigrationComplete 把"清业务 prefs + 写
+                // schemaVersion + firstLaunch flag" 一起走，避免下次启动 guard 仍 mismatch
+                // 又触发一次清库。第十一轮 P2 review。
+                markSchemaMigrationComplete()
             } catch {
                 Log.write("[Migration] reset failed to delete store: \(error)")
             }

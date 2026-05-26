@@ -676,7 +676,13 @@ final class RefreshService: ObservableObject {
         guard snapshot.summarizedCount >= 3 else { return }
 
         let s = state(for: cat)
-        if RefreshDecision.shouldRegenerateRecommend(
+        // P2 第十一轮 review：coverage gate 必须同时挡 recommend 与 digest。
+        // 旧实现只挡 digest，5 篇文章只成功 3 篇摘要时仍会用混 nil-summary 的
+        // snapshot.all 跑推荐（RecommendEngine line 26 用 snapshot.all 不过滤 summary）。
+        // 产品规则是"摘要质量不足就不要生成派生内容"，推荐与日报对齐。
+        if !coverage {
+            Log.write("[Recommend][\(catRaw)] skip — coverage below threshold")
+        } else if RefreshDecision.shouldRegenerateRecommend(
             hasNewArticles: hasNewArticles,
             isEmpty: s.recommendedArticleIDs.isEmpty,
             currentCount: snapshot.summarizedCount,

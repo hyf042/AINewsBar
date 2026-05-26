@@ -201,15 +201,30 @@ actor BailianService: AISummarizing {
     /// **正则提取**（第八轮 P3 review）：旧实现按 `,，、 \n\t` 分隔后整数解析，
     /// 模型啰嗦时返回 "1. 2. 3." / "[1] [2]" / "1) 2) 3)" / "推荐：1,3,7" 都会
     /// 解析为空集合。改为提取所有 `\d+` 串再过滤范围，对 prompt 输出格式更鲁棒。
+    ///
+    /// **末尾冒号优先**（第九轮 P3 review）：全文正则会把解释文字里的数字吃进去，
+    /// 例如 "推荐5篇：1,2,3,4,5" → [5,1,2,3,4]（"推荐5篇" 里的 5 抢先）。
+    /// 模型啰嗦时常见 "解释 : 结果" 格式，结果区只含序号；优先取最后一个 `:` / `：`
+    /// 之后的内容做提取，命中非空即用，否则 fallback 全文以兼容无冒号格式
+    /// ("1, 2, 3, 4, 5" / "[1] [2] [3]" 等)。
     static func parseRecommendResponse(_ response: String, totalCount: Int, count: Int = 5) -> [Int] {
         guard count > 0, totalCount > 0 else { return [] }
-        let nsResponse = response as NSString
-        let range = NSRange(location: 0, length: nsResponse.length)
-        let matches = Self.digitsRegex.matches(in: response, range: range)
+        if let lastColonIdx = response.lastIndex(where: { $0 == ":" || $0 == "：" }) {
+            let tail = String(response[response.index(after: lastColonIdx)...])
+            let extracted = extractRecommendIds(from: tail, totalCount: totalCount, count: count)
+            if !extracted.isEmpty { return extracted }
+        }
+        return extractRecommendIds(from: response, totalCount: totalCount, count: count)
+    }
+
+    private static func extractRecommendIds(from text: String, totalCount: Int, count: Int) -> [Int] {
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+        let matches = Self.digitsRegex.matches(in: text, range: range)
         var seen = Set<Int>()
         var result: [Int] = []
         for match in matches {
-            let token = nsResponse.substring(with: match.range)
+            let token = nsText.substring(with: match.range)
             guard let n = Int(token), n >= 1, n <= totalCount, !seen.contains(n) else { continue }
             seen.insert(n)
             result.append(n)

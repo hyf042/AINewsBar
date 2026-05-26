@@ -15,6 +15,13 @@ struct AddFeedSheet: View {
     @State private var saveErrorMessage = ""
     @State private var showSaveErrorAlert = false
 
+    /// 第九轮 P3：统一 trim 值。空值判断、validate fetch、去重比对、存盘都用同一份。
+    /// 旧路径 line 56 用原始值判空，line 105 用原始值 fetch，line 141 才 trim →
+    /// "   " 标题能通过 disabled gate 进入校验；带前后空白的 URL 可能校验失败但 trim 后
+    /// 不同的 URL 又写入；"校验失败但仍要添加"的强制路径里更容易触发不一致。
+    private var trimmedURL: String { url.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     init(isPresented: Binding<Bool>, defaultCategory: AINewsBar.Category = .ai) {
         self._isPresented = isPresented
         self.defaultCategory = defaultCategory
@@ -53,7 +60,7 @@ struct AddFeedSheet: View {
                 Button("取消") { isPresented = false }
                 Button("添加") { Task { await validateAndAdd() } }
                     .buttonStyle(.borderedProminent)
-                    .disabled(url.isEmpty || title.isEmpty || isValidating)
+                    .disabled(trimmedURL.isEmpty || trimmedTitle.isEmpty || isValidating)
             }
         }
         .padding(20)
@@ -102,7 +109,9 @@ struct AddFeedSheet: View {
     private func validateAndAdd() async {
         validationStatus = .checking
         do {
-            let articles = try await RSSService.shared.fetchRawArticles(feedURL: url)
+            // 用 trimmedURL 校验：与最终存盘 URL 完全一致，避免"校验通过 X 但存了 trim(X)"
+            // 或反向"校验失败 X 但用户强制添加后存了 trim(X)"两类不一致
+            let articles = try await RSSService.shared.fetchRawArticles(feedURL: trimmedURL)
             if articles.isEmpty {
                 validationStatus = .failure("URL 可达但未返回任何文章")
                 showForceAddAlert = true
@@ -120,7 +129,8 @@ struct AddFeedSheet: View {
         // P3 第六轮 review #1：strict fetch 去重 —— 旧 `try? fetch ?? []` 会让
         // DB 查询失败被当成"没有重复"，false-empty 写路径。fetch 失败必须中止保存，
         // 别静默插入可能导致用户数据出问题。
-        let normalized = Self.normalize(url)
+        // 第九轮 P3：用 trimmedURL 比对，与 validateAndAdd / 存盘路径一致
+        let normalized = Self.normalize(trimmedURL)
         let existing: [Feed]
         do {
             existing = try modelContext.fetch(FetchDescriptor<Feed>())
@@ -135,11 +145,6 @@ struct AddFeedSheet: View {
             return
         }
 
-        // P3 第六轮 review #1：trim 后再存，避免空白被持久化。验证路径（validateAndAdd
-        // 走 RSSService.fetch）也 trim 后送出会更彻底，但 RSSService 已加 scheme 校验
-        // 上游兜底；这里只对存盘 URL 做最小 normalize（保留 case 与 query）。
-        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let feed = Feed(title: trimmedTitle, url: trimmedURL,
                         isBuiltIn: false, category: selectedCategory)
         modelContext.insert(feed)

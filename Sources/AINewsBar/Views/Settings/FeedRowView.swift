@@ -4,6 +4,7 @@ import SwiftData
 struct FeedRowView: View {
     @Bindable var feed: Feed
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var refreshService: RefreshService
     @State private var saveErrorMessage = ""
     @State private var showSaveErrorAlert = false
     let checkStatus: CheckStatus
@@ -62,16 +63,25 @@ struct FeedRowView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)
-                .onChange(of: feed.skipFilter) { oldValue, _ in
-                    saveSkipFilterChange(revertingTo: oldValue)
+                .onChange(of: feed.skipFilter) { oldValue, newValue in
+                    saveSkipFilterChange(newValue: newValue, revertingTo: oldValue)
                 }
         }
         .help("跳过 AI 筛选（纯净源用，省 token；如 Apple Newsroom 100% 都是公司动态可开启）")
     }
 
-    private func saveSkipFilterChange(revertingTo oldValue: Bool) {
+    private func saveSkipFilterChange(newValue: Bool, revertingTo oldValue: Bool) {
         do {
-            try modelContext.safeSaveOrThrow()
+            let updated = try FeedSettingsStore.persistSkipFilterChange(
+                feed: feed, newValue: newValue, in: modelContext
+            )
+            // 第九轮 P2：旧 pending 被 flip 成 accepted=true 后，badge 计数变化、
+            // 推荐/日报旧结果可能漏掉这批新可见文章 — postUnreadCount + 清派生缓存。
+            if newValue && updated > 0 {
+                refreshService.postUnreadCount(context: modelContext)
+                let cat = AINewsBar.Category.from(rawValue: feed.category)
+                refreshService.invalidatePerCatCache(for: cat)
+            }
         } catch {
             modelContext.rollback()
             feed.skipFilter = oldValue
@@ -152,16 +162,24 @@ struct BuiltInFeedRowView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)
-                .onChange(of: feed.skipFilter) { oldValue, _ in
-                    saveSkipFilterChange(revertingTo: oldValue)
+                .onChange(of: feed.skipFilter) { oldValue, newValue in
+                    saveSkipFilterChange(newValue: newValue, revertingTo: oldValue)
                 }
         }
         .help("跳过 AI 筛选（纯净源用，省 token；如 Apple Newsroom 100% 都是公司动态可开启）")
     }
 
-    private func saveSkipFilterChange(revertingTo oldValue: Bool) {
+    private func saveSkipFilterChange(newValue: Bool, revertingTo oldValue: Bool) {
         do {
-            try modelContext.safeSaveOrThrow()
+            let updated = try FeedSettingsStore.persistSkipFilterChange(
+                feed: feed, newValue: newValue, in: modelContext
+            )
+            // 第九轮 P2：同 FeedRowView，旧 pending → accepted=true 后 badge / 派生缓存需同步
+            if newValue && updated > 0 {
+                refreshService.postUnreadCount(context: modelContext)
+                let cat = AINewsBar.Category.from(rawValue: feed.category)
+                refreshService.invalidatePerCatCache(for: cat)
+            }
         } catch {
             modelContext.rollback()
             feed.skipFilter = oldValue

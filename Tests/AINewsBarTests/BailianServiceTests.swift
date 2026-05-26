@@ -109,6 +109,43 @@ final class BailianServiceTests: XCTestCase {
         XCTAssertEqual(result, [12, 7, 23, 4, 18])
     }
 
+    // MARK: - 第九轮 P3：末尾冒号优先（避免解释文字数字混入）
+
+    /// 模型在冒号前的解释里含数字（如 "推荐5篇"）：旧实现会把这个 5 抢先吞掉，
+    /// 导致 [5,1,2,3,4] 顺序错乱（甚至少一个 id）。新实现按"解释 : 结果"切片，
+    /// 优先取最后冒号后段，结果应保持 [1,2,3,4,5]。
+    func testParseSkipsDigitsInPrefixBeforeColon() {
+        XCTAssertEqual(
+            BailianService.parseRecommendResponse("推荐5篇：1,2,3,4,5", totalCount: 20),
+            [1, 2, 3, 4, 5]
+        )
+        XCTAssertEqual(
+            BailianService.parseRecommendResponse("Top 5 picks: 7, 3, 8, 1, 4", totalCount: 20),
+            [7, 3, 8, 1, 4]
+        )
+    }
+
+    /// 无冒号格式（全文正则 fallback）：保持旧 "1,2,3,4,5" / "1) 2)" 兼容。
+    func testParseFallsBackToWholeStringWhenNoColon() {
+        XCTAssertEqual(
+            BailianService.parseRecommendResponse("1, 2, 3, 4, 5", totalCount: 20),
+            [1, 2, 3, 4, 5]
+        )
+    }
+
+    /// 冒号在结果后又跟说明（无意义数字）：取最后一个冒号后段为空数字时应 fallback 全文。
+    /// 例 "1,2,3:" 末尾冒号后是空，全文 fallback 回到 [1,2,3]。
+    func testParseFallsBackWhenTailAfterLastColonHasNoDigits() {
+        XCTAssertEqual(
+            BailianService.parseRecommendResponse("1, 2, 3:", totalCount: 20),
+            [1, 2, 3]
+        )
+        XCTAssertEqual(
+            BailianService.parseRecommendResponse("1, 2, 3：结束", totalCount: 20),
+            [1, 2, 3]
+        )
+    }
+
     // MARK: - Prompt 构造
 
     func testSummaryPromptIncludesTitle() {

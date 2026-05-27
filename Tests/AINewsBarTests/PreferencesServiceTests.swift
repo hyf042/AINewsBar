@@ -44,6 +44,50 @@ final class PreferencesServiceTests: XCTestCase {
         XCTAssertNil(prefs.getAPIKey())
     }
 
+    // MARK: - 第十三轮 P2：边界 trim（治 UI 层未拦截的脏值 + 历史 UserDefaults 残留）
+
+    /// 用户从网页复制 key 带尾部空白/换行 → 写入时 trim
+    func testSaveAPIKeyTrimsWhitespace() {
+        prefs.saveAPIKey("  sk-test-123\n")
+        XCTAssertEqual(prefs.getAPIKey(), "sk-test-123")
+    }
+
+    /// 历史 UserDefaults 已存了脏值（UI 升级前写入）→ get 也 trim 兜底
+    /// 直接走底层 defaults.set 模拟旧版本写入
+    func testGetAPIKeyTrimsHistoricalDirtyValue() {
+        defaults.set("  sk-old-dirty\n\t", forKey: "com.ainewsbar.claude-api-key")
+        XCTAssertEqual(prefs.getAPIKey(), "sk-old-dirty")
+    }
+
+    /// 全空白 key 写入应等价于清空
+    func testSaveWhitespaceOnlyAPIKeyClears() {
+        prefs.saveAPIKey("sk-x")
+        prefs.saveAPIKey("   \n\t  ")
+        XCTAssertNil(prefs.getAPIKey())
+    }
+
+    /// 全空白历史值读取等价 nil
+    func testGetWhitespaceOnlyHistoricalAPIKeyReturnsNil() {
+        defaults.set("   \n  ", forKey: "com.ainewsbar.claude-api-key")
+        XCTAssertNil(prefs.getAPIKey())
+    }
+
+    func testSaveModelTrimsWhitespace() {
+        prefs.saveModel("  qwen-custom\n")
+        XCTAssertEqual(prefs.getModel(), "qwen-custom")
+    }
+
+    func testGetModelTrimsHistoricalDirtyValue() {
+        defaults.set("  qwen-dirty\n", forKey: "com.ainewsbar.model")
+        XCTAssertEqual(prefs.getModel(), "qwen-dirty")
+    }
+
+    func testSaveWhitespaceOnlyModelFallsBackToDefault() {
+        prefs.saveModel("custom")
+        prefs.saveModel("   ")
+        XCTAssertEqual(prefs.getModel(), PreferencesService.defaultModel)
+    }
+
     // MARK: - Model
 
     func testGetModelDefault() {

@@ -405,9 +405,12 @@ final class RefreshService: ObservableObject {
 
         let existingURLs: Set<String>
         do {
+            // 第十三轮 P3：用 URLNormalizer 归一化比对（保留 path / query 大小写 + 保留
+            // 全部 query；仅小写 scheme+host、去 fragment、单次尾斜杠）。旧裸字符串让
+            // "/foo" vs "/foo/" / Example.com vs example.com / #fragment 差异都重复入库。
             existingURLs = Set(try context.safeFetchOrThrow(
                 FetchDescriptor<Article>(predicate: #Predicate { $0.category == catRaw })
-            ).map(\.url))
+            ).map { URLNormalizer.normalize($0.url) })
         } catch {
             mutate(cat) { $0.lastError = "数据库查询失败，跳过本次刷新" }
             return
@@ -872,11 +875,14 @@ final class RefreshService: ObservableObject {
             // accepted 初值规则（见 Article.accepted 注释）
             let acceptedAtInsert: Bool? = (!needFilter || result.feedSkipFilter) ? true : nil
             for raw in result.articles {
+                // 第十三轮 P3：归一化后比对；原 raw.url 仍用于存储（保留追踪参数，浏览器
+                // 打开时不破坏目标页跟踪能力）。归一化只影响"是否视为同一篇"。
+                let key = URLNormalizer.normalize(raw.url)
                 guard let pubDate = raw.publishedAt,
-                      !existingURLs.contains(raw.url),
-                      !seenURLs.contains(raw.url),
+                      !existingURLs.contains(key),
+                      !seenURLs.contains(key),
                       pubDate >= startOfToday else { continue }
-                seenURLs.insert(raw.url)
+                seenURLs.insert(key)
                 newArticles.append(Article(
                     title: raw.title, url: raw.url, content: raw.content,
                     publishedAt: pubDate,

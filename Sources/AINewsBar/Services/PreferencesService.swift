@@ -16,13 +16,22 @@ final class PreferencesService: PreferencesStoring {
 
     // MARK: - 全局 API Key / Model（不动）
 
+    /// 第十三轮 P2 review：API Key / Model 在持久化边界**写入和读取**都 trim。
+    ///
+    /// 第十二轮只修了 APISettingsView UI 层 —— 但用户老版本里已经存了带换行/空白的 key
+    /// 时升级后主流程仍会 HTTP 401（"Authorization: Bearer sk-...\n"），除非用户重新
+    /// 进设置页保存触发 UI 路径的 trim。底层 service 读写都 trim 兜底治历史脏数据。
+    /// caller (UI / RefreshService / BailianService) 不需感知。
+
     func saveAPIKey(_ key: String) {
-        defaults.set(key.isEmpty ? nil : key, forKey: apiKeyKey)
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        defaults.set(trimmed.isEmpty ? nil : trimmed, forKey: apiKeyKey)
     }
 
     func getAPIKey() -> String? {
-        let value = defaults.string(forKey: apiKeyKey)
-        return value?.isEmpty == false ? value : nil
+        let value = defaults.string(forKey: apiKeyKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (value?.isEmpty == false) ? value : nil
     }
 
     func deleteAPIKey() {
@@ -30,11 +39,14 @@ final class PreferencesService: PreferencesStoring {
     }
 
     func saveModel(_ model: String) {
-        defaults.set(model.isEmpty ? nil : model, forKey: modelKey)
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        defaults.set(trimmed.isEmpty ? nil : trimmed, forKey: modelKey)
     }
 
     func getModel() -> String {
-        defaults.string(forKey: modelKey) ?? Self.defaultModel
+        let value = defaults.string(forKey: modelKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (value?.isEmpty == false ? value : nil) ?? Self.defaultModel
     }
 
     // MARK: - UI 状态（v2 新增全局 key）

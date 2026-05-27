@@ -130,7 +130,8 @@ struct AddFeedSheet: View {
         // DB 查询失败被当成"没有重复"，false-empty 写路径。fetch 失败必须中止保存，
         // 别静默插入可能导致用户数据出问题。
         // 第九轮 P3：用 trimmedURL 比对，与 validateAndAdd / 存盘路径一致
-        let normalized = Self.normalize(trimmedURL)
+        // 第十三轮 P3：用统一 URLNormalizer（保守归一化，保留 query/path 大小写）
+        let normalized = URLNormalizer.normalize(trimmedURL)
         let existing: [Feed]
         do {
             existing = try modelContext.fetch(FetchDescriptor<Feed>())
@@ -139,7 +140,7 @@ struct AddFeedSheet: View {
             showSaveErrorAlert = true
             return
         }
-        if let dupe = existing.first(where: { Self.normalize($0.url) == normalized }) {
+        if let dupe = existing.first(where: { URLNormalizer.normalize($0.url) == normalized }) {
             saveErrorMessage = "已存在相同 URL 的订阅源（\(dupe.title)），请勿重复添加"
             showSaveErrorAlert = true
             return
@@ -165,12 +166,4 @@ struct AddFeedSheet: View {
         }
     }
 
-    /// URL 规范化（仅用于去重比对，不用于存盘）：去首尾空白 / 小写 / 去尾斜杠。
-    /// 不去 protocol：http vs https 是真不同（前者明文）；不去 query：?format=rss 有意义。
-    /// 故意保守 —— 误拒绝比误合并好（用户能改 URL 重试，合并坏数据无法回滚）。
-    private static func normalize(_ url: String) -> String {
-        var s = url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        while s.hasSuffix("/") { s.removeLast() }
-        return s
-    }
 }

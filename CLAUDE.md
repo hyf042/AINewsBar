@@ -37,6 +37,7 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-26 午 | 第十一轮 review 4 项：兜底 wipe 也写 schemaVersion (markSchemaMigrationComplete helper) / coverage gate 同时挡 recommend 与 digest / sanity sweep 扩到三 model / UsageRecorder 失败 rollback；测试 223 → 224 | `144e78b` |
 | 2026-05-26 下午 | 第十二轮 review 3 项：推荐候选改 snapshot.summarized（force path 一致兜底） / APISettingsView 统一 trim / APISettingsView checkStatus onChange 重置；测试 224 → 226 | `3f157aa` |
 | 2026-05-26 下午 (二) | **v2.0.2 发布**：第 9-12 轮 review 累计修复打包 release（含 P1 schemaVersion v2-multi-category-r2 强制 nuke + DMG 分发） | `v2.0.2` |
+| 2026-05-27 | 第十三轮 review 3 项：PreferencesService 持久化边界 trim（治历史脏数据）/ skipFilter 开启后立即 fire-and-forget refresh / 抽 URLNormalizer 替换裸字符串去重；测试 226 → 247 (+14 URLNormalizer +7 PreferencesService trim) | (本次) |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -161,6 +162,9 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | RecommendEngine candidates = snapshot.summarized（第十二轮 P2）| 阈值与喂给 AI 的 items 统一从 `snapshot.summarized` 取；UI RecommendSectionView 候选不足文案按 `articles.filter { aiSummary != nil }.count` 显示 | 旧 `snapshot.all` 让 force 路径绕过 coverage gate：5 篇文章 3 篇有摘要时用户点"刷新推荐"仍烧 token 推 nil-summary 候选。新设计 candidates 同源所有 caller（auto / force / 手动）自动有保护，UI 与 Engine 用同一阈值不漂移 |
 | APISettingsView 统一 trim（第十二轮 P3）| `trimmedAPIKey` / `trimmedCustomModel` / `effectiveModel` computed 包 trim；disabled gate / saveAndCheck / checkConnection / prefs 写入全部走 trimmed 值 | 用户从网页/聊天复制 API key 常带尾部空白/换行 → 旧实现 testConnection 凭原值 HTTP 401（"Authorization: Bearer sk-...\n"），保存路径也把脏值写进 UserDefaults 污染主流程 |
 | APISettingsView checkStatus onChange 重置（第十二轮 P3）| `.onChange(of: apiKey/customModel/selectedModel)` 重置 `checkStatus = .idle`；useCustomModel toggle 已有同样行为 | 检测成功后用户改输入 UI 仍显示"API Key 和模型均可用"误导用户；状态必须与当前 form 输入同步 |
+| PreferencesService 持久化边界 trim（第十三轮 P2）| `saveAPIKey/saveModel` 写入 trim + `getAPIKey/getModel` 读取也 trim 兜底治历史脏数据 | 第十二轮只修了 UI 层 trim，但用户老版本已存的带换行/空白 key 升级后主流程仍 401，除非重新进设置页保存。底层 service 读写都 trim，治史 + 防御未来未拦截写入 |
+| skipFilter 开启后 fire-and-forget refresh（第十三轮 P3）| FeedRowView updated > 0 时除 postUnreadCount + invalidatePerCatCache 外，`Task { await service.refresh(cat) }` 立即跑 AI 派生 | invalidatePerCatCache 明确不清 lastRefreshDate → 不触发 stale 阈值；旧体验切开关后文章可见但推荐/日报空着等 30 分钟。refresh 内部 inflight 复用不会双开 AI |
+| URLNormalizer 保守归一化（第十三轮 P3）| 新 `Utils/URLNormalizer.swift`：trim / 小写 scheme+host / 去 fragment / 删 path 全部尾斜杠（含 root "/"）/ **保留** 全部 query + path 大小写。RefreshService existingURLs / seenURLs + AddFeedSheet 都用 | 旧裸字符串 `existingURLs.contains(raw.url)` 让 "/foo" vs "/foo/" / Example.com vs example.com / #fragment 差异都重复入库重复烧 token。保守原则：宁可漏归一化重复入库 1 次，不能误合并丢失不同文章。query 不能删（`?id=123` 是路径） |
 
 ---
 

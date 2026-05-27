@@ -77,10 +77,16 @@ struct FeedRowView: View {
             )
             // 第九轮 P2：旧 pending 被 flip 成 accepted=true 后，badge 计数变化、
             // 推荐/日报旧结果可能漏掉这批新可见文章 — postUnreadCount + 清派生缓存。
+            // 第十三轮 P3：立即 fire-and-forget refresh(cat) 让 AI 派生重跑。
+            // invalidatePerCatCache 不清 lastRefreshDate → 不触发，需手动 refresh。
+            // 旧体验：文章可见但推荐/日报空着，得等 30 分钟 stale 或下次 timer。
+            // refresh() 内部 inflight 复用，与正在跑的刷新合并，不会双开 AI。
             if newValue && updated > 0 {
                 refreshService.postUnreadCount(context: modelContext)
                 let cat = AINewsBar.Category.from(rawValue: feed.category)
                 refreshService.invalidatePerCatCache(for: cat)
+                let service = refreshService
+                Task { await service.refresh(cat) }
             }
         } catch {
             modelContext.rollback()

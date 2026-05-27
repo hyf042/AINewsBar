@@ -51,11 +51,18 @@ enum BuiltInFeeds {
 
     /// 同步内置源到数据库：删除已失效的内置源（含其文章），添加缺失的新源。
     /// 注意：旧版本升级后 v2 全清重建，syncInto 会注入全部 27 源。
+    ///
+    /// **第十四轮 P3 review**：URL 比对统一走 `URLNormalizer.normalize`。旧 exact match
+    /// 让历史用户自定义源 (e.g. `https://Example.com/feed/`) 与内置源 (`https://example.com/feed`)
+    /// 视为不同 → 同一资源两条 feed 共存。与 RefreshService 入库去重 + AddFeedSheet 添加去重
+    /// 保持一致归一化规则。
     @MainActor
     @discardableResult
     static func syncInto(context: ModelContext) -> Bool {
-        let expectedURLs = Set(all.map(\.url))
-        let expectedByURL = Dictionary(uniqueKeysWithValues: all.map { ($0.url, $0) })
+        let expectedURLs = Set(all.map { URLNormalizer.normalize($0.url) })
+        let expectedByURL = Dictionary(
+            uniqueKeysWithValues: all.map { (URLNormalizer.normalize($0.url), $0) }
+        )
         let existing: [Feed]
         do {
             existing = try context.safeFetchOrThrow(
@@ -68,7 +75,7 @@ enum BuiltInFeeds {
 
         do {
             // 删除已失效的内置源及其文章
-            let toRemove = existing.filter { !expectedURLs.contains($0.url) }
+            let toRemove = existing.filter { !expectedURLs.contains(URLNormalizer.normalize($0.url)) }
             for feed in toRemove {
                 let feedID = feed.id
                 let orphans = try context.safeFetchOrThrow(
@@ -85,7 +92,7 @@ enum BuiltInFeeds {
             // 下次启动反复重试同一删除。新顺序对 rollback 等价（事务原子），
             // 但成功路径下"feed.category 与 articles 状态"始终一致。
             for feed in existing {
-                guard let expected = expectedByURL[feed.url] else { continue }
+                guard let expected = expectedByURL[URLNormalizer.normalize(feed.url)] else { continue }
                 let categoryChanged = feed.category != expected.category.rawValue
                 let titleChanged = feed.title != expected.title
                 let feedID = feed.id
@@ -112,8 +119,8 @@ enum BuiltInFeeds {
             // 忽略，导致两条同 URL feed 共存（重复 fetch / 重复显示 / 失败统计噪声）。
             // 删除 / 元数据同步仍只动 built-in（custom 由用户管理）。
             let allFeeds = try context.safeFetchOrThrow(FetchDescriptor<Feed>())
-            let anyExistingURLs = Set(allFeeds.map(\.url))
-            all.filter { !anyExistingURLs.contains($0.url) }
+            let anyExistingURLs = Set(allFeeds.map { URLNormalizer.normalize($0.url) })
+            all.filter { !anyExistingURLs.contains(URLNormalizer.normalize($0.url)) }
                 .map { entry in
                     Feed(title: entry.title, url: entry.url,
                          isBuiltIn: true, category: entry.category)
@@ -131,6 +138,9 @@ enum BuiltInFeeds {
 
     /// 容灾去重：按 URL 移除重复文章，保留 publishedAt 最新的一条。
     /// 仅在 ModelContainer 重建路径调用；正常启动跳过（refresh 已做双重去重）。
+    ///
+    /// **第十四轮 P3 review**：用 URLNormalizer.normalize 做去重 key —
+    /// "/foo" vs "/foo/" / Example.com vs example.com / #fragment 差异都视为同一篇。
     @MainActor
     static func deduplicateArticles(context: ModelContext) {
         let all = context.safeFetch(
@@ -138,10 +148,11 @@ enum BuiltInFeeds {
         )
         var seen = Set<String>()
         for article in all {
-            if seen.contains(article.url) {
+            let key = URLNormalizer.normalize(article.url)
+            if seen.contains(key) {
                 context.delete(article)
             } else {
-                seen.insert(article.url)
+                seen.insert(key)
             }
         }
         context.safeSave()

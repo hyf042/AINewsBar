@@ -37,7 +37,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-26 午 | 第十一轮 review 4 项：兜底 wipe 也写 schemaVersion (markSchemaMigrationComplete helper) / coverage gate 同时挡 recommend 与 digest / sanity sweep 扩到三 model / UsageRecorder 失败 rollback；测试 223 → 224 | `144e78b` |
 | 2026-05-26 下午 | 第十二轮 review 3 项：推荐候选改 snapshot.summarized（force path 一致兜底） / APISettingsView 统一 trim / APISettingsView checkStatus onChange 重置；测试 224 → 226 | `3f157aa` |
 | 2026-05-26 下午 (二) | **v2.0.2 发布**：第 9-12 轮 review 累计修复打包 release（含 P1 schemaVersion v2-multi-category-r2 强制 nuke + DMG 分发） | `v2.0.2` |
-| 2026-05-27 | 第十三轮 review 3 项：PreferencesService 持久化边界 trim（治历史脏数据）/ skipFilter 开启后立即 fire-and-forget refresh / 抽 URLNormalizer 替换裸字符串去重；测试 226 → 247 (+14 URLNormalizer +7 PreferencesService trim) | (本次) |
+| 2026-05-27 | 第十三轮 review 3 项：PreferencesService 持久化边界 trim（治历史脏数据）/ skipFilter 开启后立即 fire-and-forget refresh / 抽 URLNormalizer 替换裸字符串去重；测试 226 → 247 (+14 URLNormalizer +7 PreferencesService trim) | `5fdfac8` |
+| 2026-05-27 (二) | 第十四轮 review 2 项：抽 RefreshService.handleSkipFilterPendingFlipped helper 两个 FeedRow 共享 / BuiltInFeeds.syncInto + deduplicateArticles 统一 URLNormalizer；测试 247 → 250 | (本次) |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -165,6 +166,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | PreferencesService 持久化边界 trim（第十三轮 P2）| `saveAPIKey/saveModel` 写入 trim + `getAPIKey/getModel` 读取也 trim 兜底治历史脏数据 | 第十二轮只修了 UI 层 trim，但用户老版本已存的带换行/空白 key 升级后主流程仍 401，除非重新进设置页保存。底层 service 读写都 trim，治史 + 防御未来未拦截写入 |
 | skipFilter 开启后 fire-and-forget refresh（第十三轮 P3）| FeedRowView updated > 0 时除 postUnreadCount + invalidatePerCatCache 外，`Task { await service.refresh(cat) }` 立即跑 AI 派生 | invalidatePerCatCache 明确不清 lastRefreshDate → 不触发 stale 阈值；旧体验切开关后文章可见但推荐/日报空着等 30 分钟。refresh 内部 inflight 复用不会双开 AI |
 | URLNormalizer 保守归一化（第十三轮 P3）| 新 `Utils/URLNormalizer.swift`：trim / 小写 scheme+host / 去 fragment / 删 path 全部尾斜杠（含 root "/"）/ **保留** 全部 query + path 大小写。RefreshService existingURLs / seenURLs + AddFeedSheet 都用 | 旧裸字符串 `existingURLs.contains(raw.url)` 让 "/foo" vs "/foo/" / Example.com vs example.com / #fragment 差异都重复入库重复烧 token。保守原则：宁可漏归一化重复入库 1 次，不能误合并丢失不同文章。query 不能删（`?id=123` 是路径） |
+| handleSkipFilterPendingFlipped helper（第十四轮 P3）| RefreshService 加 `func handleSkipFilterPendingFlipped(for:context:)` 封装 postUnreadCount + invalidatePerCatCache + fire-and-forget refresh；FeedRowView / BuiltInFeedRowView 都调用 | 第十三轮只修了自定义源路径，内置源 saveSkipFilterChange 缺 refresh —— 文章可见但 AI 派生空着等 timer。典型 copy-paste 漏一半；helper 化两个 row 共享行为 |
+| BuiltInFeeds URLNormalizer 统一（第十四轮 P3）| `syncInto`：expectedURLs / expectedByURL / anyExistingURLs lookup 全部 normalize；`deduplicateArticles` 容灾去重 key 也 normalize | 旧 exact match 让历史用户自定义源 `https://OpenAI.com/news/RSS.xml` 与内置 `https://openai.com/news/rss.xml` 视为不同 → 重复共存。与 RefreshService 入库 + AddFeedSheet 添加 + 容灾去重规则统一 |
 
 ---
 

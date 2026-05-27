@@ -75,18 +75,12 @@ struct FeedRowView: View {
             let updated = try FeedSettingsStore.persistSkipFilterChange(
                 feed: feed, newValue: newValue, in: modelContext
             )
-            // 第九轮 P2：旧 pending 被 flip 成 accepted=true 后，badge 计数变化、
-            // 推荐/日报旧结果可能漏掉这批新可见文章 — postUnreadCount + 清派生缓存。
-            // 第十三轮 P3：立即 fire-and-forget refresh(cat) 让 AI 派生重跑。
-            // invalidatePerCatCache 不清 lastRefreshDate → 不触发，需手动 refresh。
-            // 旧体验：文章可见但推荐/日报空着，得等 30 分钟 stale 或下次 timer。
-            // refresh() 内部 inflight 复用，与正在跑的刷新合并，不会双开 AI。
+            // 第九轮 P2 / 第十三轮 P3 / 第十四轮 P3：行为收敛到
+            // `refreshService.handleSkipFilterPendingFlipped(for:context:)`，
+            // 见该 helper 注释。两个 FeedRow 共享避免 copy-paste 漏一半。
             if newValue && updated > 0 {
-                refreshService.postUnreadCount(context: modelContext)
                 let cat = AINewsBar.Category.from(rawValue: feed.category)
-                refreshService.invalidatePerCatCache(for: cat)
-                let service = refreshService
-                Task { await service.refresh(cat) }
+                refreshService.handleSkipFilterPendingFlipped(for: cat, context: modelContext)
             }
         } catch {
             modelContext.rollback()
@@ -180,11 +174,11 @@ struct BuiltInFeedRowView: View {
             let updated = try FeedSettingsStore.persistSkipFilterChange(
                 feed: feed, newValue: newValue, in: modelContext
             )
-            // 第九轮 P2：同 FeedRowView，旧 pending → accepted=true 后 badge / 派生缓存需同步
+            // 第九轮 P2 / 第十四轮 P3：同 FeedRowView 走共享 helper。
+            // 第十四轮前内置源路径漏了立即 refresh —— 文章可见但 AI 派生空着等 timer。
             if newValue && updated > 0 {
-                refreshService.postUnreadCount(context: modelContext)
                 let cat = AINewsBar.Category.from(rawValue: feed.category)
-                refreshService.invalidatePerCatCache(for: cat)
+                refreshService.handleSkipFilterPendingFlipped(for: cat, context: modelContext)
             }
         } catch {
             modelContext.rollback()

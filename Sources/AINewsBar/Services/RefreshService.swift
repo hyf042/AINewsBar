@@ -228,6 +228,24 @@ final class RefreshService: ObservableObject {
         await refreshAllCatsSequentially()
     }
 
+    /// 第十三轮 P3 + 第十四轮 P3：skipFilter 开启把旧 pending 翻 accepted=true 后的善后。
+    /// FeedRowView / BuiltInFeedRowView 通过此 helper 共享行为，避免 copy-paste 漏一半
+    /// （第十三轮只修了自定义源路径，内置源路径漏了立即 refresh —— 用户感受到文章可见但
+    /// 推荐/日报空着等 30 分钟）。
+    ///
+    /// 三步：
+    /// 1. postUnreadCount —— badge 同步（新文章可见会改 `isRead==false && accepted==true` 集合）
+    /// 2. invalidatePerCatCache —— digest/recommend 旧结果可能漏掉新可见文章
+    /// 3. fire-and-forget refresh(cat) —— invalidate **不**清 lastRefreshDate，
+    ///    不主动 refresh 用户会看到文章但 AI 派生空着等 stale 阈值。inflight
+    ///    复用机制保证与正在跑的刷新合并不双开 AI。
+    func handleSkipFilterPendingFlipped(for cat: AINewsBar.Category, context: ModelContext) {
+        postUnreadCount(context: context)
+        invalidatePerCatCache(for: cat)
+        let service = self
+        Task { await service.refresh(cat) }
+    }
+
     /// 第八轮 P2 review：禁用内置源 / 删除自定义源后调用 —— 该 cat 的现存推荐/日报
     /// 可能引用已删除文章或包含已删除源的内容。本方法清掉该 cat 的派生缓存：
     /// - dailyDigest（文本可能含已删源标题/摘要 → 必清）

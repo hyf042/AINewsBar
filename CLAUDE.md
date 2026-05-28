@@ -38,7 +38,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-26 下午 | 第十二轮 review 3 项：推荐候选改 snapshot.summarized（force path 一致兜底） / APISettingsView 统一 trim / APISettingsView checkStatus onChange 重置；测试 224 → 226 | `3f157aa` |
 | 2026-05-26 下午 (二) | **v2.0.2 发布**：第 9-12 轮 review 累计修复打包 release（含 P1 schemaVersion v2-multi-category-r2 强制 nuke + DMG 分发） | `v2.0.2` |
 | 2026-05-27 | 第十三轮 review 3 项：PreferencesService 持久化边界 trim（治历史脏数据）/ skipFilter 开启后立即 fire-and-forget refresh / 抽 URLNormalizer 替换裸字符串去重；测试 226 → 247 (+14 URLNormalizer +7 PreferencesService trim) | `5fdfac8` |
-| 2026-05-27 (二) | 第十四轮 review 2 项：抽 RefreshService.handleSkipFilterPendingFlipped helper 两个 FeedRow 共享 / BuiltInFeeds.syncInto + deduplicateArticles 统一 URLNormalizer；测试 247 → 250 | (本次) |
+| 2026-05-27 (二) | 第十四轮 review 2 项：抽 RefreshService.handleSkipFilterPendingFlipped helper 两个 FeedRow 共享 / BuiltInFeeds.syncInto + deduplicateArticles 统一 URLNormalizer；测试 247 → 250 | `861b96f` |
+| 2026-05-28 | 第十五轮 review 3 项：MenuBarView.onAppear 无条件 refreshIfNeeded 防跨日 stale / build.sh bump 2.0.2→2.0.3 / 修 BuiltInFeedsTests 假阳性 case；测试 250 持平（强化断言） | (本次) |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -168,6 +169,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | URLNormalizer 保守归一化（第十三轮 P3）| 新 `Utils/URLNormalizer.swift`：trim / 小写 scheme+host / 去 fragment / 删 path 全部尾斜杠（含 root "/"）/ **保留** 全部 query + path 大小写。RefreshService existingURLs / seenURLs + AddFeedSheet 都用 | 旧裸字符串 `existingURLs.contains(raw.url)` 让 "/foo" vs "/foo/" / Example.com vs example.com / #fragment 差异都重复入库重复烧 token。保守原则：宁可漏归一化重复入库 1 次，不能误合并丢失不同文章。query 不能删（`?id=123` 是路径） |
 | handleSkipFilterPendingFlipped helper（第十四轮 P3）| RefreshService 加 `func handleSkipFilterPendingFlipped(for:context:)` 封装 postUnreadCount + invalidatePerCatCache + fire-and-forget refresh；FeedRowView / BuiltInFeedRowView 都调用 | 第十三轮只修了自定义源路径，内置源 saveSkipFilterChange 缺 refresh —— 文章可见但 AI 派生空着等 timer。典型 copy-paste 漏一半；helper 化两个 row 共享行为 |
 | BuiltInFeeds URLNormalizer 统一（第十四轮 P3）| `syncInto`：expectedURLs / expectedByURL / anyExistingURLs lookup 全部 normalize；`deduplicateArticles` 容灾去重 key 也 normalize | 旧 exact match 让历史用户自定义源 `https://OpenAI.com/news/RSS.xml` 与内置 `https://openai.com/news/rss.xml` 视为不同 → 重复共存。与 RefreshService 入库 + AddFeedSheet 添加 + 容灾去重规则统一 |
+| MenuBarView.onAppear 无条件 refreshIfNeeded（第十五轮 P2）| onAppear 读 saved tab 后直接 `Task { await refreshService.refreshIfNeeded(saved) }`，不依赖 onChange | 旧路径只在 selectedTab 变化才触发 refresh；saved 等于默认 .ai 时不触发 onChange，macOS App Nap / 睡眠期间 timer 没醒的窗口里打开菜单看到昨天的 digest/文章。refreshIfNeeded 内部 resetCrossedDayStateIfNeeded + 30 分钟 stale guard 保证不会过度刷新 |
+| 测试假阳性矫正（第十五轮 P3）| `testSyncSkipsBuiltInWhenCustomFeedExistsWithDifferentCase` path 从 `/news/RSS.xml` 改为 `/news/rss.xml`；断言改为"OpenAI 相关 feed 总数 == 1" | 旧测试 path 大小写敏感（normalizer 视为不同 URL）→ custom + builtIn 共存两条，Set 去重后元素数恒等 → "无重复"恒成立。退化为 exact match 时不会失败 → **挡不住回归**。new 断言"openaiFeeds.count == 1"才有真实回归挡力 |
 
 ---
 

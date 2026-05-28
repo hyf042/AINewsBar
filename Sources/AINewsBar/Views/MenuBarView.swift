@@ -81,7 +81,14 @@ struct MenuBarView: View {
         .frame(width: 380)
         .onAppear {
             // 启动恢复上次选中 tab；同时尝试触发该 cat lazy refresh（财报/新闻首次切入）
-            selectedTab = PreferencesService.shared.loadSelectedTab()
+            let saved = PreferencesService.shared.loadSelectedTab()
+            selectedTab = saved
+            // 第十五轮 P2 review：无条件触发 refreshIfNeeded 让 service 层判 stale。
+            // 旧实现仅靠 onChange 触发 refresh，saved 等于默认 .ai 时不触发 onChange →
+            // 跨日打开菜单但 timer 没醒（macOS App Nap / 睡眠）的窗口里看到昨天的 digest。
+            // refreshIfNeeded 内部 resetCrossedDayStateIfNeeded() 先跑，跨日清理 + 30 分钟
+            // stale guard 保证打开菜单时数据时态正确，不会过度刷新。
+            Task { await refreshService.refreshIfNeeded(saved) }
         }
         .onChange(of: selectedTab) { _, newValue in
             PreferencesService.shared.saveSelectedTab(newValue)

@@ -61,16 +61,22 @@ final class BuiltInFeedsTests: XCTestCase {
 
     // MARK: - 第十四轮 P3：URLNormalizer 应用于 syncInto
 
-    /// 用户已有同 URL 自定义源（仅大小写不同），syncInto 不应再插入内置源 →
+    /// 用户已有同 URL 自定义源（仅 host 大小写不同），syncInto 不应再插入内置源 →
     /// 否则同一资源两条 feed 共存（重复 fetch / 重复显示 / 失败统计噪声）。
+    ///
+    /// **第十五轮 P3 review**：旧测试 path 用 `/news/RSS.xml`（大小写不同于内置的
+    /// `/news/rss.xml`），normalizer 视为不同 URL → custom + builtIn 共存两条，
+    /// "Set 去重后元素数相等"恒成立 → 测试**挡不住 exact-match 回归**。
+    /// 新数据：path 用 `/news/rss.xml`（host 大小写 = 仅有差异点），断言 OpenAI
+    /// 相关 feed 总数 == 1。这才能真正捕捉到去重逻辑失效。
     func testSyncSkipsBuiltInWhenCustomFeedExistsWithDifferentCase() throws {
         let (container, ctx) = try TestContainer.make()
         _ = container
 
-        // 模拟用户已有自定义源：URL 与内置 OpenAI News 大小写不同
+        // 模拟用户已有自定义源：仅 host 大小写与内置 OpenAI News 不同
         let custom = Feed(
             title: "我的 OpenAI 订阅",
-            url: "https://OPENAI.com/news/RSS.xml",
+            url: "https://OPENAI.com/news/rss.xml",
             isBuiltIn: false,
             category: .ai
         )
@@ -81,15 +87,15 @@ final class BuiltInFeedsTests: XCTestCase {
         XCTAssertTrue(synced)
 
         let allFeeds = try ctx.fetch(FetchDescriptor<Feed>())
-        // 注：path 大小写敏感，"/news/RSS.xml" vs "/news/rss.xml" 视为不同。但 host
-        // OPENAI.com → openai.com 等价；若 path 全小写匹配则去重。此测试验证 host case
-        // 不会导致重复插入。统计 path 大小写相同的 OpenAI 源数量。
-        let openaiURLs = allFeeds.map { URLNormalizer.normalize($0.url) }
-            .filter { $0.contains("openai.com") }
-        // 验证至少不会出现裸字符串 exact match 下的 "OpenAI vs openai" 重复
-        // 我们的 normalizer 让 host 大小写差异等价，所以这两条同 path 的应去重
-        XCTAssertEqual(Set(openaiURLs).count, openaiURLs.count,
-                       "归一化后 openai.com 相关 URL 不应有重复")
+        // 归一化后等价的 OpenAI feed 只应有 1 条（用户自己保留）。
+        // 退化为 exact match 时这里会失败（2 条共存）→ 测试有真实回归挡力。
+        let openaiFeeds = allFeeds.filter {
+            URLNormalizer.normalize($0.url).contains("openai.com/news/rss.xml")
+        }
+        XCTAssertEqual(openaiFeeds.count, 1,
+                       "host 大小写归一化等价时，custom 应阻止内置源重复插入；exact-match 回归会让此处变 2")
+        XCTAssertFalse(openaiFeeds.first?.isBuiltIn ?? true,
+                       "保留的应是用户自定义源（先入库者）")
     }
 
     /// 内置源 URL 仅 host 大小写改写过（模拟历史脏 feed 已入库）→ syncInto 不删它，

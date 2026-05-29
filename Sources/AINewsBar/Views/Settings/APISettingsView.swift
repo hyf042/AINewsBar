@@ -83,7 +83,9 @@ struct APISettingsView: View {
                     Spacer()
                     Button("保存") { Task { await saveAndCheck() } }
                         .buttonStyle(.borderedProminent)
-                        .disabled(trimmedAPIKey.isEmpty)
+                        // 与"检测可用性"对齐：saveAndCheck() 内 guard 要求 effectiveModel 非空，
+                        // 旧条件只判 key 让自定义模型为空时按钮可点却静默无事；isChecking 防检测中并发再触发。
+                        .disabled(trimmedAPIKey.isEmpty || effectiveModel.isEmpty || isChecking)
                 }
             }
         }

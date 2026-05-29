@@ -40,8 +40,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-27 | 第十三轮 review 3 项：PreferencesService 持久化边界 trim（治历史脏数据）/ skipFilter 开启后立即 fire-and-forget refresh / 抽 URLNormalizer 替换裸字符串去重；测试 226 → 247 (+14 URLNormalizer +7 PreferencesService trim) | `5fdfac8` |
 | 2026-05-27 (二) | 第十四轮 review 2 项：抽 RefreshService.handleSkipFilterPendingFlipped helper 两个 FeedRow 共享 / BuiltInFeeds.syncInto + deduplicateArticles 统一 URLNormalizer；测试 247 → 250 | `861b96f` |
 | 2026-05-28 | 第十五轮 review 3 项：MenuBarView.onAppear 无条件 refreshIfNeeded 防跨日 stale / build.sh bump 2.0.2→2.0.3 / 修 BuiltInFeedsTests 假阳性 case；测试 250 持平（强化断言） | `6150107` |
-| 2026-05-29 | 第十六轮 review 3 项：refresh() 加 startupError 守护（UI 路径绕过 AppDelegate 保护）/ FeedsSettingsView 切 cat 清 checkResults / GeneralSettingsView toggle guard 兜底 reset；测试 250 → 252 | `c6a9d5a` |
-| 2026-05-29 (二) | 第十七轮 review 3 项：AddFeedSheet 捕获 FeedDraft 原子保存（验证后改 UI 不影响保存）/ FeedsSettingsView checkRunID 挡 in-flight 跨 cat 回写 / FeedRowView+BuiltInFeedRow skipFilter 重入 guard（与 isEnabled 同级）；测试 252 持平（纯 view 层） | `c6a9d5a` |
+| 2026-05-29 | 第十六轮 review 3 项：refresh() 加 startupError 守护（UI 路径绕过 AppDelegate 保护）/ FeedsSettingsView 切 cat 清 checkResults / GeneralSettingsView toggle guard 兜底 reset；测试 250 → 252 | `0d3a3e7` |
+| 2026-05-29 (二) | 第十七轮 review 3 项：AddFeedSheet 捕获 FeedDraft 原子保存（验证后改 UI 不影响保存）/ FeedsSettingsView checkRunID 挡 in-flight 跨 cat 回写 / FeedRowView+BuiltInFeedRow skipFilter 重入 guard（与 isEnabled 同级）；测试 252 持平（纯 view 层） | `0d3a3e7` |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 

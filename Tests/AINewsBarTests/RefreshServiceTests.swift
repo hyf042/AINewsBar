@@ -459,4 +459,41 @@ final class RefreshServiceTests: XCTestCase {
         // 紧随 refresh() 触发；本测试关注的是 "打开瞬间 UI 已切到空" 这步
         XCTAssertNil(prefs.digestContent, "prefs digest 应被跨日重置清空（即便 refresh 后未重新生成）")
     }
+
+    // MARK: - 第十六轮 P2: startupError 守护刷新
+
+    // startupError != nil 时 refresh 必须早退，不抓文章、不写 lastRefreshDate。
+    // 否则一次空刷新会抹掉 startupError 想表达的"feed 表初始化失败"根因信号。
+    func testRefreshSkippedWhenStartupErrorSet() async {
+        let feed = seedFeed("https://f/feed")
+        rss.setSuccess(feed.url, [makeRaw("https://a/1"), makeRaw("https://a/2")])
+        service.startupError = "内置 RSS 源初始化失败"
+
+        await service.refresh()
+
+        XCTAssertEqual(fetchArticles().count, 0, "startupError 时不应抓取/入库文章")
+        XCTAssertNil(service.state(for: .ai).lastRefreshDate, "startupError 时不应推进 lastRefreshDate")
+    }
+
+    // 守护放在 resetCrossedDayStateIfNeeded() 之后：即使 startupError 阻止刷新，
+    // 跨日清理仍须执行让昨天的 digest/文章失效（避免打开菜单看到 stale 数据）。
+    func testCrossedDayResetStillRunsWhenStartupErrorSet() async {
+        let feed = seedFeed("https://f/feed")
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+        context.insert(Article(title: "old", url: "https://a/old", publishedAt: yesterday,
+                               feedID: feed.id, feedTitle: feed.title))
+        try? context.save()
+        service._testMutate(for: .ai) {
+            $0.lastRefreshDate = yesterday
+            $0.dailyDigest = "昨天的摘要"
+        }
+        service.lastResetCheckDate = yesterday
+        prefs.saveDigest(content: "昨天的摘要", date: yesterday, for: .ai)
+        service.startupError = "内置 RSS 源初始化失败"
+
+        await service.refresh()
+
+        XCTAssertEqual(fetchArticles().count, 0, "跨日清理应删昨天文章（且 startupError 阻止重新抓取）")
+        XCTAssertNil(prefs.digestContent, "跨日清理应清空昨天 digest，不被 startupError 守护跳过")
+    }
 }

@@ -366,6 +366,20 @@ final class RefreshService: ObservableObject {
     func refresh(_ cat: AINewsBar.Category = .ai) async {
         resetCrossedDayStateIfNeeded()
 
+        // 第十六轮 P2 review：startupError != nil 意味着 BuiltInFeeds.syncInto 失败，
+        // feed 表可能不完整或空。继续刷新只会跑出"无 feed → 0 文章 → lastRefreshDate
+        // 更新但 UI 空"的诡异状态，还会用一次空刷新抹掉 startupError 想表达的根因信号。
+        // AppDelegate 启动路径已 skip launchBackgroundRefreshIfNeeded，但 MenuBarView.onAppear /
+        // lazy tab-switch / handleSystemWake 等 UI/系统路径绕过那层保护 —— 必须在 service 层
+        // （所有刷新的统一底层入口）兜底，refreshIfNeeded 也经此守护。
+        // 守护放在 resetCrossedDayStateIfNeeded() 之后：跨日清理仍需执行让昨天 digest 失效。
+        // force* 重生成不走此路径（操作已有 snapshot，不依赖 feed 表），故不受影响。
+        // 未来若做显式"重试启动修复"入口，由该入口清 startupError 后再放行刷新。
+        guard startupError == nil else {
+            Log.write("[Refresh][\(cat.rawValue)] startupError set, skip refresh to avoid polluting lastRefreshDate")
+            return
+        }
+
         if let existing = refreshTasks[cat] {
             await existing.value
             return

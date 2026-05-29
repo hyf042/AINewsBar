@@ -68,8 +68,15 @@ struct GeneralSettingsView: View {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
+            // 第十六轮 P3：确定性 guard 时序，照抄 FeedRowView.handleToggle 模式。
+            // 1) 先 arm guard 再回写 oldValue（回写会触发 onChange 重入，由 guard 吃掉并 reset）
+            // 2) 兜底：下一个 RunLoop turn 强制 reset。若 launchAtLogin = oldValue 因 SwiftUI
+            //    去重 / @AppStorage 行为未触发 onChange，guard 会永久卡 true 吃掉用户下次真实 toggle。
             isRevertingLaunchAtLogin = true
             launchAtLogin = oldValue
+            Task { @MainActor in
+                isRevertingLaunchAtLogin = false
+            }
             launchAtLoginErrorMessage = error.localizedDescription
             showLaunchAtLoginErrorAlert = true
         }

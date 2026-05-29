@@ -39,7 +39,9 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-26 下午 (二) | **v2.0.2 发布**：第 9-12 轮 review 累计修复打包 release（含 P1 schemaVersion v2-multi-category-r2 强制 nuke + DMG 分发） | `v2.0.2` |
 | 2026-05-27 | 第十三轮 review 3 项：PreferencesService 持久化边界 trim（治历史脏数据）/ skipFilter 开启后立即 fire-and-forget refresh / 抽 URLNormalizer 替换裸字符串去重；测试 226 → 247 (+14 URLNormalizer +7 PreferencesService trim) | `5fdfac8` |
 | 2026-05-27 (二) | 第十四轮 review 2 项：抽 RefreshService.handleSkipFilterPendingFlipped helper 两个 FeedRow 共享 / BuiltInFeeds.syncInto + deduplicateArticles 统一 URLNormalizer；测试 247 → 250 | `861b96f` |
-| 2026-05-28 | 第十五轮 review 3 项：MenuBarView.onAppear 无条件 refreshIfNeeded 防跨日 stale / build.sh bump 2.0.2→2.0.3 / 修 BuiltInFeedsTests 假阳性 case；测试 250 持平（强化断言） | (本次) |
+| 2026-05-28 | 第十五轮 review 3 项：MenuBarView.onAppear 无条件 refreshIfNeeded 防跨日 stale / build.sh bump 2.0.2→2.0.3 / 修 BuiltInFeedsTests 假阳性 case；测试 250 持平（强化断言） | `6150107` |
+| 2026-05-29 | 第十六轮 review 3 项：refresh() 加 startupError 守护（UI 路径绕过 AppDelegate 保护）/ FeedsSettingsView 切 cat 清 checkResults / GeneralSettingsView toggle guard 兜底 reset；测试 250 → 252 | `c6a9d5a` |
+| 2026-05-29 (二) | 第十七轮 review 3 项：AddFeedSheet 捕获 FeedDraft 原子保存（验证后改 UI 不影响保存）/ FeedsSettingsView checkRunID 挡 in-flight 跨 cat 回写 / FeedRowView+BuiltInFeedRow skipFilter 重入 guard（与 isEnabled 同级）；测试 252 持平（纯 view 层） | `c6a9d5a` |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -171,6 +173,12 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | BuiltInFeeds URLNormalizer 统一（第十四轮 P3）| `syncInto`：expectedURLs / expectedByURL / anyExistingURLs lookup 全部 normalize；`deduplicateArticles` 容灾去重 key 也 normalize | 旧 exact match 让历史用户自定义源 `https://OpenAI.com/news/RSS.xml` 与内置 `https://openai.com/news/rss.xml` 视为不同 → 重复共存。与 RefreshService 入库 + AddFeedSheet 添加 + 容灾去重规则统一 |
 | MenuBarView.onAppear 无条件 refreshIfNeeded（第十五轮 P2）| onAppear 读 saved tab 后直接 `Task { await refreshService.refreshIfNeeded(saved) }`，不依赖 onChange | 旧路径只在 selectedTab 变化才触发 refresh；saved 等于默认 .ai 时不触发 onChange，macOS App Nap / 睡眠期间 timer 没醒的窗口里打开菜单看到昨天的 digest/文章。refreshIfNeeded 内部 resetCrossedDayStateIfNeeded + 30 分钟 stale guard 保证不会过度刷新 |
 | 测试假阳性矫正（第十五轮 P3）| `testSyncSkipsBuiltInWhenCustomFeedExistsWithDifferentCase` path 从 `/news/RSS.xml` 改为 `/news/rss.xml`；断言改为"OpenAI 相关 feed 总数 == 1" | 旧测试 path 大小写敏感（normalizer 视为不同 URL）→ custom + builtIn 共存两条，Set 去重后元素数恒等 → "无重复"恒成立。退化为 exact match 时不会失败 → **挡不住回归**。new 断言"openaiFeeds.count == 1"才有真实回归挡力 |
+| refresh() startupError 守护（第十六轮 P2）| `refresh(_:)` 在 `resetCrossedDayStateIfNeeded()` 后 `guard startupError == nil else { return }`；覆盖所有经 refresh 的路径（refreshIfNeeded / lazy tab-switch / handleSystemWake）；force* 不走此路径不受影响 | AppDelegate 在 syncInto 失败时已 skip launchBackgroundRefreshIfNeeded 避免"无 feed → 0 文章 → lastRefreshDate 更新但 UI 空"，但 MenuBarView.onAppear 无条件 refreshIfNeeded（第十五轮引入）把这层保护从 UI 路径拆穿。service 层是统一底层入口，在此兜底最干净；守护放 reset 之后保证跨日清理仍执行让昨天 digest 失效 |
+| FeedsSettingsView 切 cat 清 checkResults（第十六轮 P3）| `onChange(of: selectedCategory)` 加 `checkResults = [:]` | summaryText 统计整个 checkResults 不按当前 cat 过滤；AI 页检测完"11/11 个源正常"切到财报/新闻仍显示旧分类汇总。检测结果本属某 cat 的 feed，切走即应失效，清空是最简正解 |
+| GeneralSettingsView toggle guard 兜底 reset（第十六轮 P3）| `toggleLaunchAtLogin` catch 照抄 FeedRowView.handleToggle 模式：arm guard → 回写 oldValue → `Task { @MainActor } 下一轮强制 reset` | 旧实现仅靠回写 oldValue 触发 onChange 来 reset isRevertingLaunchAtLogin；若该赋值因 SwiftUI 去重 / @AppStorage 行为没触发 onChange，guard 永久卡 true 吃掉用户下次真实 toggle（同 FeedRowView 已修过的时序陷阱）|
+| AddFeedSheet 原子 FeedDraft（第十七轮 P2）| 点击"添加"瞬间捕获 `FeedDraft{url,title,category}`（已 trim 的不可变值），`validateAndAdd(draft)` → 校验/去重/存盘全程只用它；强制添加路径存 `pendingDraft`，alert "仍要添加" 只保存该 draft | 旧路径校验用当时 trimmedURL，await 返回后 addFeed() 重读当前 UI 状态去重+建 Feed；用户在 RSS 请求期间改 URL/标题/分类会"验证通过 A，实际保存 B"。强制添加 alert 同病。捕获 draft 是最小原子边界，不必禁用输入 |
+| FeedsSettingsView checkRunID 挡 in-flight（第十七轮 P3）| 新增 `checkRunID`；checkFeed/checkAll 开始递增并捕获，await/group 回写前 `guard runID == checkRunID`；切 cat onChange 也 bump（+ 置 isCheckingAll=false）使旧 run 失效 | 第十六轮切 cat 清 checkResults 只挡静态串显示，挡不住 checkAll() 已启动的 task group 继续把旧分类结果回写污染新 tab。token 比对让"不是当前检测"的回写丢弃；checkAll 完成复位 isCheckingAll 也加 guard 避免覆盖切 cat 后的状态 |
+| skipFilter 回滚重入 guard（第十七轮 P3）| FeedRowView + BuiltInFeedRowView 各加 `isRevertingSkipFilter`；onChange 先判 guard 吃掉重入，catch 照抄 isEnabled 时序：arm guard → rollback + 回写 oldValue → Task 下一轮兜底 reset | 旧 skipFilter catch 直接 rollback + `feed.skipFilter = oldValue`，回写再触发 onChange → 重复 saveSkipFilterChange / 重复 alert。同文件 isEnabled 路径（handleToggle / Toggle onChange）早已做此 guard，skipFilter 漏了同级处理 |
 
 ---
 

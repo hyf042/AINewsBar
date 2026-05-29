@@ -8,6 +8,10 @@ struct FeedsSettingsView: View {
     @State private var selectedCategory: AINewsBar.Category = .ai
     @State private var checkResults: [UUID: CheckStatus] = [:]
     @State private var isCheckingAll = false
+    /// 第十七轮 P3：检测运行 token。每次发起检测（单个 / 全部）递增并捕获，
+    /// 切 cat 时也递增。in-flight task 回写前比对 —— 不是当前 run 就丢弃，
+    /// 避免"检测全部过程中切 cat，旧分类结果回写污染新 tab"。
+    @State private var checkRunID = 0
     @State private var showAddSheet = false
     @State private var deleteErrorMessage = ""
     @State private var showDeleteErrorAlert = false
@@ -48,6 +52,14 @@ struct FeedsSettingsView: View {
             }
             .onChange(of: selectedCategory) { _, newValue in
                 PreferencesService.shared.saveSettingsFeedsTab(newValue)
+                // 第十六轮 P3：切 cat 清空 checkResults。summaryText 统计整个 checkResults，
+                // 切 cat 不清会让汇总跨分类串显示（AI 检测完"11/11 个源正常"切到财报/新闻
+                // 仍显示旧分类汇总）。检测结果本就属于某一 cat 的 feed，切走即应失效。
+                checkResults = [:]
+                // 第十七轮 P3：bump runID 让正在跑的 checkAll/checkFeed 的 in-flight 回写失效，
+                // 否则旧分类 task 完成后仍写回 checkResults 重新污染新 tab。
+                isCheckingAll = false
+                checkRunID += 1
             }
 
             Divider()
@@ -107,13 +119,18 @@ struct FeedsSettingsView: View {
     }
 
     private func checkFeed(_ feed: Feed) async {
+        // 第十七轮 P3：捕获 runID，await 返回后比对当前 runID（切 cat 会 bump）。
+        checkRunID += 1
+        let runID = checkRunID
         checkResults[feed.id] = .checking
         do {
             let articles = try await RSSService.shared.fetchRawArticles(feedURL: feed.url)
+            guard runID == checkRunID else { return }
             checkResults[feed.id] = articles.isEmpty
                 ? .failure("未返回任何文章")
                 : .success(articles.count)
         } catch {
+            guard runID == checkRunID else { return }
             checkResults[feed.id] = .failure(error.localizedDescription)
         }
     }
@@ -139,6 +156,10 @@ struct FeedsSettingsView: View {
 
     /// v2: 检测范围限当前 picker 选中 cat 的 feeds（避免一次性检测 30+ 个源）
     private func checkAll() async {
+        // 第十七轮 P3：捕获 runID。切 cat（onChange bump）或下一次检测会让本 run 失效，
+        // group 内 in-flight 回写前比对，避免旧分类结果污染新 tab。
+        checkRunID += 1
+        let runID = checkRunID
         isCheckingAll = true
         let toCheck = filteredFeeds
         for feed in toCheck { checkResults[feed.id] = .checking }
@@ -158,9 +179,12 @@ struct FeedsSettingsView: View {
                 }
             }
             for await (id, status) in group {
+                guard runID == checkRunID else { continue }
                 checkResults[id] = status
             }
         }
+        // 仅当仍是本 run 才复位 isCheckingAll（切 cat 已置 false / 新 run 已置 true，不覆盖）
+        guard runID == checkRunID else { return }
         isCheckingAll = false
     }
 }

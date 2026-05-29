@@ -7,6 +7,8 @@ struct FeedRowView: View {
     @EnvironmentObject private var refreshService: RefreshService
     @State private var saveErrorMessage = ""
     @State private var showSaveErrorAlert = false
+    /// 第十七轮 P3：skipFilter 回滚重入 guard，与 isEnabled 同级处理。
+    @State private var isRevertingSkipFilter = false
     let checkStatus: CheckStatus
     let onCheck: () async -> Void
 
@@ -64,6 +66,10 @@ struct FeedRowView: View {
                 .toggleStyle(.switch)
                 .controlSize(.mini)
                 .onChange(of: feed.skipFilter) { oldValue, newValue in
+                    if isRevertingSkipFilter {
+                        isRevertingSkipFilter = false
+                        return
+                    }
                     saveSkipFilterChange(newValue: newValue, revertingTo: oldValue)
                 }
         }
@@ -83,8 +89,15 @@ struct FeedRowView: View {
                 refreshService.handleSkipFilterPendingFlipped(for: cat, context: modelContext)
             }
         } catch {
+            // 第十七轮 P3：确定性 guard 时序，与 isEnabled 的 handleToggle 同处理。
+            // 先 arm guard 再回写 oldValue（回写触发 onChange 重入，由 guard 吃掉），
+            // Task 下一轮兜底 reset 防"回写未触发 onChange → guard 卡 true 吃掉下次真实 toggle"。
+            isRevertingSkipFilter = true
             modelContext.rollback()
             feed.skipFilter = oldValue
+            Task { @MainActor in
+                isRevertingSkipFilter = false
+            }
             saveErrorMessage = error.localizedDescription
             showSaveErrorAlert = true
         }
@@ -98,6 +111,8 @@ struct BuiltInFeedRowView: View {
     @State private var saveErrorMessage = ""
     @State private var showSaveErrorAlert = false
     @State private var isRevertingEnabledChange = false
+    /// 第十七轮 P3：skipFilter 回滚重入 guard，与 isEnabled 的 isRevertingEnabledChange 同级。
+    @State private var isRevertingSkipFilter = false
     let checkStatus: CheckStatus
     let onCheck: () async -> Void
 
@@ -163,6 +178,10 @@ struct BuiltInFeedRowView: View {
                 .toggleStyle(.switch)
                 .controlSize(.mini)
                 .onChange(of: feed.skipFilter) { oldValue, newValue in
+                    if isRevertingSkipFilter {
+                        isRevertingSkipFilter = false
+                        return
+                    }
                     saveSkipFilterChange(newValue: newValue, revertingTo: oldValue)
                 }
         }
@@ -181,8 +200,15 @@ struct BuiltInFeedRowView: View {
                 refreshService.handleSkipFilterPendingFlipped(for: cat, context: modelContext)
             }
         } catch {
+            // 第十七轮 P3：确定性 guard 时序，与 isEnabled 的 handleToggle 同处理。
+            // 先 arm guard 再回写 oldValue（回写触发 onChange 重入，由 guard 吃掉），
+            // Task 下一轮兜底 reset 防"回写未触发 onChange → guard 卡 true 吃掉下次真实 toggle"。
+            isRevertingSkipFilter = true
             modelContext.rollback()
             feed.skipFilter = oldValue
+            Task { @MainActor in
+                isRevertingSkipFilter = false
+            }
             saveErrorMessage = error.localizedDescription
             showSaveErrorAlert = true
         }

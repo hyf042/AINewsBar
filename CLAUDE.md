@@ -48,6 +48,7 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-29 (六) | 第十九轮 review 第 2 项：AddFeedSheet + APISettingsView 异步校验加 request identity（generation 令牌）；治"用户请求期间改输入后旧请求仍回写 UI / 提交旧草稿 / 写旧 key+model 进 prefs"；测试持平（纯 view 层） | `18d2433` |
 | 2026-05-29 (七) | **Linus 系统性 review + 重构第 1 项**：RefreshService 注释精简（删 70+ 处"第X轮 review"历史考古注释，1103→1003 行；逻辑零变更，历史已在 git log + 本表保留）。结论：facade 1103 行肥肉 80% 是注释而非逻辑，去注释后 ~886 行内聚于"刷新编排"单一职责，强拆会增间接层故不拆。流程建议：review 准入门槛改为"能描述真实触发路径才改"，第 13 轮后多为理论竞态边际收益趋零；测试 252 持平 | `d6ec4e5` |
 | 2026-05-29 (八) | 第二十轮 review P2：hasNewArticles 语义修复（"可见新文章" vs "RSS 入库数"）；runFilterStage 返回 newlyAccepted，财报 cat 本轮新抓全被 filter reject 时不再白烧 recommend/digest token；TDD 加 2 测试（全 reject 不重生 + 部分 accept 仍重生），测试 252→254 | — |
+| 2026-05-29 (九) | **Linus 系统性 review 重构第 2-3 项**（2 commits）：① FeedRow/BuiltInFeedRow toggle 改自定义 Binding（set 里 mutate→persist，失败 rollback 自动回弹），删 4 处 isReverting guard + Task 兜底重入舞蹈；② RefreshService 删 2 处 v2 迁移残留（refreshIfNeeded() 无参 fallback + 全局 isSummarizing bool），activeSummaryPipelineCats 改 @Published private(set) 承接通知职责；测试 254 持平 | `0d3fe46` `34b9d7a` |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -135,7 +136,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | cleanupOldArticles 一致 strict（bb866b0 + bbb9234）| per-cat 与全 cat 两版 cleanupOldArticles 都改 throw；runRefresh / resetCrossedDayStateIfNeeded 失败 rollback + return + 不推进 lastResetCheckDate | tolerant cleanup 失败被当空结果继续推进 → 留 pending delete 或推进 guard 当天不再重试 |
 | Timer 启动与 sync 成功解耦（bbb9234）| configure() 只注入依赖；scheduleTimer 移到 launchBackgroundRefreshIfNeeded 内部（!configured 守护）。AppDelegate sync 成功才调 launch... | sync 失败时旧路径 timer 仍 hourly 触发 → 0 文章 + lastRefreshDate 更新 → UI 显示"刚刚更新但永远是空" |
 | UsageRecording 契约：失败 ⇒ tokens=0（bb866b0）| helper `record(info:success:)` 在 success=false 时强制 input/output=0；caller 仍传真实 UsageInfo 由 helper 自动丢；协议文档明确"成功生效的用量"语义 | 旧契约自相矛盾（协议说失败=0 但 helper 透传 token）；与"今日用量按 success 过滤"UI 语义对齐；caller 不用每处自己归零 |
-| FeedRowView toggle guard 确定性时序（bb866b0）| catch 顺序：**先** arm guard → rollback + 改 oldValue → 末尾 `Task { @MainActor }` 兜底 reset。无论 onChange 实际触发与否 guard 都能解除 | 旧顺序 rollback 在前可能让 feed.isEnabled 已变回 oldValue → 改 oldValue 不触发 onChange → guard 永久卡 true → 吃掉下次真实 toggle |
+| FeedRow toggle 改自定义 Binding（2026-05-29 (九)）| `Toggle($feed.*)` → `Toggle(Binding(get:set:))`：set 里先 mutate model → persist，成功落库；失败 `context.rollback()` 连带撤销 pending 改动，SwiftUI 重渲染时 get 读回旧值自动回弹。4 处 isReverting guard + Task 兜底全删 | 根因是用双向绑定做"需要校验、会失败、有副作用"的写入：Toggle 一改就已 mutate model，只能事后回写并防回写触发的 onChange 重入。Binding set 把校验前移到"提交前"，失败什么都不必撤销以外的状态已经没有 |
+| FeedRowView toggle guard 确定性时序（bb866b0，已被上条取代）| ~~catch 顺序：先 arm guard → rollback + 改 oldValue → Task 兜底 reset~~ | 历史方案，现改 Binding set 从根本消灭需求 |
 | APISettings 失败设 globalAIError（bb866b0）| checkConnection catch 调 `GlobalAIError.from(error) ?? .other(localizedDescription)` 设 refreshService.globalAIError | 旧路径只更新行内 checkStatus，菜单 UI 仍显示旧可用状态直到下轮 refresh，违背"用户在设置页看到失败时主 UI 也应同步"语义 |
 | AppDelegate syncInto 失败可见（bb866b0）| 检查 Bool 返回；失败 set globalAIError + skip launchBackgroundRefreshIfNeeded | 旧实现忽略返回值；feed 表可能空但 refresh 仍跑 → 0 文章 + lastRefreshDate 更新 |
 | Auto path 并发→顺序（第四轮 review）| `refreshAllCatsConcurrently` → `refreshAllCatsSequentially`，timer/wake/launch 三入口顺序 await `refreshIfNeeded(_:)`；手动单 cat / force* 不变 | 旧 3×5=15 峰值靠 "DashScope 30 QPS" provider 不变量保护，限速调整 / key 多端共享一旦发生整次刷新失败；后台路径优先可靠性，峰值降到 5，最坏冷启动 ~1-2 分钟可接受 |

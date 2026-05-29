@@ -44,6 +44,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-29 (二) | 第十七轮 review 3 项：AddFeedSheet 捕获 FeedDraft 原子保存（验证后改 UI 不影响保存）/ FeedsSettingsView checkRunID 挡 in-flight 跨 cat 回写 / FeedRowView+BuiltInFeedRow skipFilter 重入 guard（与 isEnabled 同级）；测试 252 持平（纯 view 层） | `0d3a3e7` |
 | 2026-05-29 (三) | 第十八轮 review 1 项：FeedsSettingsView checkRunID → categoryGeneration（仅切 cat 递增，检测只捕获不递增）；修第十七轮引入的"同 cat 并发单检互相作废 / checkAll 中点单检丢弃批量结果"回归；测试持平（纯 view 层） | `7c05018` |
 | 2026-05-29 (四) | 第十八轮 review 第 2 项：FeedsSettingsView.summaryText 以 filteredFeeds id 集合做交集，只统计当前可见 feed 结果；治"同 cat 内删源/加源/检测中列表变化残留孤儿 id 被汇总继续统计"；测试持平（纯 view 层） | — |
+| 2026-05-29 (五) | 第十九轮 review 第 1 项：APISettingsView 保存按钮禁用条件对齐检测（`trimmedAPIKey.isEmpty \|\| effectiveModel.isEmpty \|\| isChecking`）；治"自定义模型为空按钮可点却静默无事 / 检测中再点并发触发"；测试持平（纯 view 层） | `c5e73fb` |
+| 2026-05-29 (六) | 第十九轮 review 第 2 项：AddFeedSheet + APISettingsView 异步校验加 request identity（generation 令牌）；治"用户请求期间改输入后旧请求仍回写 UI / 提交旧草稿 / 写旧 key+model 进 prefs"；测试持平（纯 view 层） | `18d2433` |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -183,6 +185,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | skipFilter 回滚重入 guard（第十七轮 P3）| FeedRowView + BuiltInFeedRowView 各加 `isRevertingSkipFilter`；onChange 先判 guard 吃掉重入，catch 照抄 isEnabled 时序：arm guard → rollback + 回写 oldValue → Task 下一轮兜底 reset | 旧 skipFilter catch 直接 rollback + `feed.skipFilter = oldValue`，回写再触发 onChange → 重复 saveSkipFilterChange / 重复 alert。同文件 isEnabled 路径（handleToggle / Toggle onChange）早已做此 guard，skipFilter 漏了同级处理 |
 | checkRunID → categoryGeneration（第十八轮）| 计数器语义改为"分类代际"，**仅** onChange(selectedCategory) 递增；checkFeed/checkAll **只捕获不递增**，回写前 `guard generation == categoryGeneration` | 第十七轮用"每次操作递增"的全局 token 表达"同 cat 并发检测互不干扰"是错的——检测结果本就按 feed.id 落 checkResults 天然独立。旧实现引入两个回归：(1) 快速点两个不同源检测，后者 bump 让前者结果被丢弃永停"检测中"；(2) checkAll 运行中点单检 bump 让批量剩余结果回写时被丢弃。只有切 cat 才需整体失效，单 cat 内并发检测无需互相作废 |
 | summaryText 交集当前可见 feed（第十八轮）| `summaryText` 先 `Set(filteredFeeds.map(\.id))`，只统计 checkResults 中仍可见的 id | checkResults 是 [UUID: CheckStatus] 字典，切 cat 会清空但同 cat 内删源/加源/检测中列表变化会残留孤儿 id → 底部"x/y 个源正常"把已删源继续算进去。以可见 id 做交集是单点防御，胜过在每条删除/添加 mutation 路径散布清理（DRY + 免检测竞态）|
+| 保存按钮门控对齐检测（第十九轮 P3-1）| APISettingsView 保存按钮 disabled 由 `trimmedAPIKey.isEmpty` 改为 `trimmedAPIKey.isEmpty \|\| effectiveModel.isEmpty \|\| isChecking`，与"检测可用性"按钮一致 | 旧条件只判 key，但 `saveAndCheck()` 内 `guard !model.isEmpty` 还要求 model 非空 → 自定义模型为空时按钮可点却静默 return；检测中（.checking）未禁用 → 再点并发触发第二次 testConnection。UI 门控必须与业务 guard 同契约 |
+| 异步校验 request identity（第十九轮 P3-2）| AddFeedSheet（`validationGeneration`，仅 URL onChange 递增）+ APISettingsView（`checkGeneration`，4 处输入 onChange 经 `invalidateCheck()` 递增）；请求起始捕获 generation，await 返回后 `guard generation == 当前` 否则丢弃 | 第十七/十二轮已把 draft/key+model 原子捕获，但**回写时**无请求身份：用户在 RSS/testConnection 请求期间改输入（onChange 重置状态让按钮重新可点），旧请求返回仍会回写 UI、`addFeed(旧 draft)`、把旧 key/model 写进 prefs 并显示成功。同第十八轮 categoryGeneration 模式扩展到异步校验。关键：令牌递增处已复位状态为 `.idle`，过期 `return` 不回写不会让 UI 卡"检测中"。AddFeedSheet 仅 URL 失效——title/category 中途变更属第十七轮原子草稿"提交点击瞬间所选"既定语义 |
 
 ---
 

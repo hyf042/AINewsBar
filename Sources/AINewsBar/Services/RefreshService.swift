@@ -7,12 +7,10 @@ enum AIAvailability: Equatable, Sendable {
     case unavailable(String)
 }
 
-/// 全局 AI 错误（v2-multi-category 新增）：与 per-cat 业务错误区分。
-/// API Key / 网络 / 配额等问题影响所有 cat，UI 顶部 sticky banner 显示一条。
-///
-/// H4: 拆分 invalidAPIKey vs forbidden —— DashScope 401 是 key 错，403 常见是
-/// "key 有效但模型未授权"（用户开通了 qwen-plus 没开通 qwen3.6-plus）。一锅炖会让
-/// 用户去设置看 key 在那里却被告知"未配置"，怀疑代码 bug。
+/// 全局 AI 错误：API Key / 网络 / 配额等影响所有 cat 的问题，UI 顶部 sticky banner 显示一条。
+/// 与 per-cat aiAvailability 区分。
+/// 401 (invalidAPIKey) 与 403 (forbidden) 必须分开：403 常见是"key 有效但模型未授权"，
+/// 一锅炖会让用户在设置看到 key 在那里却被告知"未配置"。
 enum GlobalAIError: Equatable, Sendable {
     case invalidAPIKey       // HTTP 401
     case forbidden           // HTTP 403 —— 模型未授权 / 账号权限不足
@@ -21,8 +19,7 @@ enum GlobalAIError: Equatable, Sendable {
     case other(String)
 }
 
-/// v2-multi-category: 单 cat 的 UI 状态聚合。改为 struct 值类型，
-/// 让 RefreshService 通过 `mutate(_:_:)` 集中触发 @Published states 字典变更通知。
+/// 单 cat 的 UI 状态聚合。值类型，所有变更经 RefreshService.mutate(_:_:) 触发 @Published states 通知。
 struct CategoryState: Sendable {
     var dailyDigest: String?
     var recommendedArticleIDs: [UUID] = []
@@ -39,45 +36,35 @@ struct CategoryState: Sendable {
     var lastFetchErrorCount: Int = 0
 }
 
-/// 编排者（Facade）：聚合 @Published UI 状态、调度 RSS / Pipeline / Engine / FilterPipeline、原子提交持久化
-/// v2-multi-category: 状态全 per-cat（states dict）。生产 UI 一律走 `state(for:)`；
-/// 改 state 走 `mutate(_:_:)`（内部）或 `markAvailability(_:for:)`（公开）；
-/// 测试走 `_testMutate(for:_:)`（DEBUG-only）。
+/// 编排者（Facade）：聚合 per-cat @Published 状态、调度 RSS / Pipeline / Engine / FilterPipeline、原子提交持久化。
+/// 状态全 per-cat（states dict）。UI 读走 `state(for:)`；改 state 走 `mutate`（内部）/ `markAvailability`（公开）/ `_testMutate`（DEBUG）。
 @MainActor
 final class RefreshService: ObservableObject {
-    /// 单例。两套机制并存：
-    /// - `shared` 提供全局可达入口（AppDelegate.applicationDidFinishLaunching 启动期调用）
-    /// - `@StateObject` 在 SwiftUI View 层承担状态订阅（生命周期由 SwiftUI 管）
-    /// 实际运行期同一个实例。测试通过 `init(rss:ai:prefs:)` 创建独立实例不影响生产。
+    /// `shared` 提供全局入口（AppDelegate 启动期调用）；View 层通过 `@StateObject = .shared`
+    /// 承担订阅，运行期同一实例。测试用 `init(rss:ai:prefs:)` 创建独立实例。
     static let shared = RefreshService()
 
-    // MARK: - Published state (v2: per-cat dict + global flags)
+    // MARK: - Published state (per-cat dict + global flags)
 
-    /// per-cat 状态字典。setter 私有：任何外部修改必须走 `mutate` / `markAvailability`
-    /// / `_testMutate`（DEBUG），杜绝绕过单一变更点直接改 dict 的可能。
+    /// per-cat 状态字典。setter 私有：外部修改必须走 mutate / markAvailability / _testMutate。
     @Published private(set) var states: [AINewsBar.Category: CategoryState] =
         Dictionary(uniqueKeysWithValues: AINewsBar.Category.allCases.map { ($0, CategoryState()) })
 
-    /// 摘要 pipeline 是否在跑（全局兼容 flag）。UI 新代码优先使用
-    /// `isSummarizing(category:)`，避免一个 tab 的 AI 处理禁用所有 tab。
+    /// 全局兼容 flag。新代码优先 `isSummarizing(category:)`，避免一个 tab 的处理禁用所有 tab。
     @Published var isSummarizing = false
 
-    /// 全局 AI 错误（如 API Key 错 / 网络错）。与 per-cat aiAvailability 区分：
-    /// global error 影响所有 cat，UI 顶部 sticky banner；per-cat error 在 tab 内 banner。
+    /// 全局 AI 错误（影响所有 cat，UI 顶部 sticky banner）。
     @Published var globalAIError: GlobalAIError?
 
-    /// 启动期非 AI 错误（如 RSS 内置源 syncInto 失败 / store 初始化重大问题）。
-    /// 与 globalAIError 分离：
-    /// - 复用 globalAIError 会让任何一次 AI 成功 (`clearGlobalAIErrorAfterAISuccess`)
-    ///   被静默清除，错误"自愈"但根因仍在；UI 也会显示成"AI 不可用"误导用户。
-    /// - startupError 不被 AI 路径触碰，sticky 到重启或显式 reset。
+    /// 启动期非 AI 错误（RSS 内置源 syncInto 失败 / store 初始化问题）。与 globalAIError 分离：
+    /// 后者会被任意 AI 成功路径静默清除让根因"自愈"，且 UI 文案会误导成"AI 不可用"。
     @Published var startupError: String?
 
-    /// 跨日 guard 专用日期（全局事件，不分 cat）。
-    /// 与 lastRefreshDate 分离：旧实现复用 lastRefreshDate 做跨日判断会被 refresh() 末尾抹掉信号。
+    /// 跨日 guard 专用日期（全局事件，不分 cat）。与 lastRefreshDate 分离：
+    /// 复用 lastRefreshDate 做跨日判断会被 refresh() 末尾抹掉信号。
     var lastResetCheckDate: Date?
 
-    // MARK: - State accessors (v2 推荐 API)
+    // MARK: - State accessors
 
     func state(for cat: AINewsBar.Category) -> CategoryState {
         states[cat] ?? CategoryState()
@@ -87,15 +74,12 @@ final class RefreshService: ObservableObject {
         activeSummaryPipelineCats.contains(cat)
     }
 
-    /// 公开 setter：让 View 标记 per-cat AI 可用性（API Key 测试成功/失败等场景）。
-    /// 仅暴露 aiAvailability 这一个字段，其他字段一律走内部 mutate。
+    /// 公开 setter：让 View 标记 per-cat AI 可用性（API Key 测试成功/失败等）。仅暴露 aiAvailability。
     func markAvailability(_ availability: AIAvailability, for cat: AINewsBar.Category) {
         mutate(cat) { $0.aiAvailability = availability }
     }
 
-    /// 单一变更点。约定：block 内**禁止递归调 mutate**（哪怕跨 cat），否则
-    /// `states[cat] = state` 会触发多次 @Published 通知，导致 SwiftUI 多次重渲。
-    /// 当前所有 caller 都是简单字段赋值，无递归路径。
+    /// 单一变更点。约定：block 内禁止递归调 mutate（哪怕跨 cat），否则会触发多次 @Published 通知。
     private func mutate(_ cat: AINewsBar.Category, _ block: (inout CategoryState) -> Void) {
         var state = states[cat] ?? CategoryState()
         block(&state)
@@ -103,8 +87,7 @@ final class RefreshService: ObservableObject {
     }
 
     #if DEBUG
-    /// 测试专用：用 closure 修改指定 cat 的 state，走 mutate 路径保证 @Published 通知触发。
-    /// 不让测试直接 set states[cat] —— 单一变更点（mutate）也是 SwiftUI 订阅的唯一信号源。
+    /// 测试专用：走 mutate 路径保证 @Published 通知触发，不让测试直接 set states[cat]。
     func _testMutate(for cat: AINewsBar.Category, _ block: (inout CategoryState) -> Void) {
         mutate(cat, block)
     }
@@ -137,9 +120,8 @@ final class RefreshService: ObservableObject {
     private let usageRetentionDays = 30
     private let filterMaxFailures = 3
 
-    /// per-cat aiAvailability=.unavailable 的"未配置 API Key" reason 唯一文案。
-    /// applyCredentialChange 精确比对这一条 —— 不能误清"摘要调用多数失败/摘要保存失败"等
-    /// non-credential 业务错误（误清会掩盖真实问题，等下一轮 refresh 才能重判）。
+    /// per-cat "未配置 API Key" reason 唯一文案。applyCredentialChange 精确比对这一条，
+    /// 不能误清"摘要调用多数失败"等 non-credential 业务错误。
     static let missingCredentialReason = "未配置 API Key"
 
     // MARK: - Mutable
@@ -148,12 +130,11 @@ final class RefreshService: ObservableObject {
     private var modelContext: ModelContext?
     private var configured = false
 
-    /// per-cat inflight task。同 cat 的 refresh 复用 task；cross-cat 可并发（DashScope 30 QPS 安全）
-    /// force* 入口也 await 同 cat 的 task 完成，避免 auto+force 并发 commit 互相覆盖
+    /// per-cat inflight task。同 cat refresh 复用同一 task（含 force* 入口），避免并发 commit 互相覆盖；
+    /// cross-cat 可并发。
     private var refreshTasks: [AINewsBar.Category: Task<Void, Never>] = [:]
 
-    /// 正在运行摘要 pipeline 的 cat 集合。全局 `isSummarizing` 从集合派生，保留旧 API；
-    /// UI 可查询当前 cat，避免 cross-cat 并发时误禁用其他 tab。
+    /// 正在跑摘要 pipeline 的 cat 集合。全局 isSummarizing 从集合派生。
     private var activeSummaryPipelineCats: Set<AINewsBar.Category> = []
 
     // MARK: - Init
@@ -173,18 +154,16 @@ final class RefreshService: ObservableObject {
 
     // MARK: - Public lifecycle
 
-    /// 注入依赖 + 恢复持久化状态。**不再启动 timer**（P2-B：configure 与
-    /// "启动后台 timer" 解耦，让 AppDelegate 在 BuiltInFeeds.syncInto 成功后
-    /// 才调 launchBackgroundRefreshIfNeeded 启动 timer，避免 sync 失败时 timer
-    /// 仍一小时一次清空"最后刷新时间"）。
+    /// 注入依赖 + 恢复持久化状态。**不启动 timer**：timer 由 launchBackgroundRefreshIfNeeded 启，
+    /// 让 AppDelegate 在 BuiltInFeeds.syncInto 成功后才启，避免 sync 失败时 timer 仍清空"最后刷新时间"。
     func configure(with context: ModelContext, usage: (any UsageRecording)? = nil) {
         modelContext = context
         self.usage = usage
         loadPersistedStateAllCats()
     }
 
-    /// 主动清理 timer 和 inflight tasks。测试 tearDown 显式调用。
-    /// Swift 5.9 工具链不支持 @MainActor isolated deinit，无法在 deinit 兜底。
+    /// 主动清理 timer 和 inflight tasks。测试 tearDown 显式调用
+    /// （Swift 5.9 不支持 @MainActor isolated deinit）。
     func stop() {
         timer?.invalidate()
         timer = nil
@@ -195,13 +174,9 @@ final class RefreshService: ObservableObject {
         configured = false
     }
 
-    /// 后台启动入口（AppDelegate 在 BuiltInFeeds.syncInto 成功后调用）。
-    /// **副作用**：启动 hourly timer（首次调用）+ 触发首轮刷新。
-    /// v2: 首启 (firstLaunchAfterSchemaUpgrade=true) 仅刷新 AI cat（首屏 27 源全抓体验差）；
-    /// 后续走 refreshAllCatsSequentially 三 cat 顺序。
+    /// 后台启动入口（AppDelegate 在 syncInto 成功后调用）。副作用：首次调用启动 hourly timer + 触发首轮刷新。
+    /// 首启（firstLaunchAfterSchemaUpgrade）仅刷 AI cat（首屏 27 源全抓体验差）；后续走三 cat 顺序。
     func launchBackgroundRefreshIfNeeded() {
-        // P2-B: timer 在此启动（不再 configure 里启）；sync 失败 AppDelegate 不
-        // 调本方法 → timer 永不启动，杜绝"sync 失败但 hourly timer 仍跑空"
         if !configured {
             configured = true
             scheduleTimer()
@@ -221,24 +196,16 @@ final class RefreshService: ObservableObject {
         }
     }
 
-    /// 系统从睡眠唤醒后的兜底入口：先做跨日重置，再顺序触发三 cat 刷新。
-    /// 这是后台自动刷新语义，仍尊重 per-cat auto-refresh 开关。
+    /// 系统唤醒兜底入口：跨日重置 + 顺序刷新三 cat（尊重 per-cat auto-refresh 开关）。
     func handleSystemWake() async {
         resetCrossedDayStateIfNeeded()
         await refreshAllCatsSequentially()
     }
 
-    /// 第十三轮 P3 + 第十四轮 P3：skipFilter 开启把旧 pending 翻 accepted=true 后的善后。
-    /// FeedRowView / BuiltInFeedRowView 通过此 helper 共享行为，避免 copy-paste 漏一半
-    /// （第十三轮只修了自定义源路径，内置源路径漏了立即 refresh —— 用户感受到文章可见但
-    /// 推荐/日报空着等 30 分钟）。
-    ///
-    /// 三步：
-    /// 1. postUnreadCount —— badge 同步（新文章可见会改 `isRead==false && accepted==true` 集合）
-    /// 2. invalidatePerCatCache —— digest/recommend 旧结果可能漏掉新可见文章
-    /// 3. fire-and-forget refresh(cat) —— invalidate **不**清 lastRefreshDate，
-    ///    不主动 refresh 用户会看到文章但 AI 派生空着等 stale 阈值。inflight
-    ///    复用机制保证与正在跑的刷新合并不双开 AI。
+    /// skipFilter 开启把旧 pending 翻 accepted=true 后的善后，FeedRowView / BuiltInFeedRowView 共享。
+    /// 三步：postUnreadCount 同步 badge → invalidatePerCatCache 让旧 digest/recommend 失效 →
+    /// fire-and-forget refresh（invalidate 不清 lastRefreshDate，不主动 refresh 则 AI 派生空着等 stale；
+    /// inflight 复用保证不双开 AI）。
     func handleSkipFilterPendingFlipped(for cat: AINewsBar.Category, context: ModelContext) {
         postUnreadCount(context: context)
         invalidatePerCatCache(for: cat)
@@ -246,16 +213,9 @@ final class RefreshService: ObservableObject {
         Task { await service.refresh(cat) }
     }
 
-    /// 第八轮 P2 review：禁用内置源 / 删除自定义源后调用 —— 该 cat 的现存推荐/日报
-    /// 可能引用已删除文章或包含已删除源的内容。本方法清掉该 cat 的派生缓存：
-    /// - dailyDigest（文本可能含已删源标题/摘要 → 必清）
-    /// - recommendedArticleIDs（引用可能失效；且非空让 RefreshDecision.shouldRegenerate
-    ///   误判为"已有结果可保留"，下次 auto refresh 不重生 → 旧结果永远不清）
-    /// - digestArticleCount / recommendArticleCount（让 delta 重新判断从 0 起算）
-    /// - prefs 同步清
-    ///
-    /// **不清** lastRefreshDate / 错误状态：caller 决定要不要紧接着 refresh（启用
-    /// 源场景需要立即跑；禁用源场景用户可能只想收掉源不想再 burn token）。
+    /// 禁用内置源 / 删除自定义源后调用：清掉该 cat 的派生缓存（digest 文本可能含已删源标题；
+    /// recommendedArticleIDs 非空会让 shouldRegenerate 误判"已有结果"，旧结果永不清）。
+    /// **不清** lastRefreshDate / 错误状态：caller 决定要不要紧接着 refresh。
     func invalidatePerCatCache(for cat: AINewsBar.Category) {
         mutate(cat) {
             $0.dailyDigest = nil
@@ -270,26 +230,13 @@ final class RefreshService: ObservableObject {
         Log.write("[Refresh][\(cat.rawValue)] invalidated per-cat cache after feed source change")
     }
 
-    /// 用户更新 credential（API Key / 模型）并测试成功后调用。
+    /// 用户更新 credential 并测试成功后调用，修复 onboarding 断点：
+    /// 首启无 key 时 refresh 已 set lastRefreshDate，用户后填 key 后 refreshIfNeeded 因 stale 阈值 skip、
+    /// tab lazy refresh 也因 lastRefreshDate 非 nil 不触发，AI tab 空白要等 timer 或手动刷新。
     ///
-    /// **onboarding 断点修复**（P2 第五轮 review）：
-    /// 旧流程在首启无 key 时仍跑 RSS 阶段并 set lastRefreshDate，AI 阶段因
-    /// `ensureCredentials` 失败退出。用户后续在设置页填 key 并测试成功，
-    /// 此时 `refreshIfNeeded` 因 lastRefreshDate < 30 分钟 skip；tab lazy
-    /// refresh 也因 lastRefreshDate 非 nil 不触发 —— AI tab 摘要/推荐空白要等
-    /// timer fire 或手动刷新，体验断裂。
-    ///
-    /// 本方法两步：
-    /// 1. 清 credential 相关错误：globalAIError + per-cat aiAvailability=.unavailable
-    ///    且 reason **完全等于** `missingCredentialReason` ("未配置 API Key") 才重置为
-    ///    .unknown（让下次 refresh 自然重判）。
-    ///    精确匹配是关键：non-credential unavailable（如"摘要调用多数失败"/"摘要保存失败"/
-    ///    "数据库查询失败"）不能被这里误清，否则真业务错误被掩盖到下一轮 refresh。
-    /// 2. 顺序 await refresh(_:) 三 cat：refresh 路径绕过 staleThreshold；
-    ///    per-cat refreshTasks inflight 复用保证与其他入口安全共存。
-    ///
-    /// caller (APISettingsView) 一般 fire-and-forget：用户不必在设置页等三 cat 跑完，
-    /// 关菜单回主 UI 时各 cat AI pipeline 已经在跑或即将完成。
+    /// 两步：(1) 清 globalAIError + per-cat aiAvailability reason **完全等于** missingCredentialReason
+    /// 的重置为 .unknown（精确匹配，避免误清真业务错误）；(2) 顺序 await refresh 三 cat（绕过 stale）。
+    /// caller 一般 fire-and-forget。
     func applyCredentialChange() async {
         globalAIError = nil
         for cat in AINewsBar.Category.allCases {
@@ -303,18 +250,10 @@ final class RefreshService: ObservableObject {
         }
     }
 
-    /// 三 cat 顺序刷新（timer fire / 首启非首次 / 系统唤醒 三个入口走此路径）。
-    ///
-    /// **可靠性优先**（P2 review）：后台自动路径不再 cross-cat 并发；
-    /// 旧实现峰值 QPS 3×5=15，靠"DashScope 30 QPS"这个 provider 不变量保护，
-    /// 不变量一旦变（限速调整 / 同一 key 多端共享）整次刷新失败。
-    /// 顺序方案峰值仅 5（cat 内部 SummaryPipeline 并发不变），最坏冷启动从
-    /// ~30s 拉长到 ~1-2 分钟，但后台用户不在等屏幕，可接受。
-    ///
-    /// v2.1: 跳过 `prefs.loadAutoRefreshEnabled(for:) == false` 的 cat 省 token。
-    /// 手动单 cat refresh / force refresh / lazy first-tab-switch 不走此路径，
-    /// 保留 cat 内并发即可（用户在等响应）。
-    /// 同 cat 不会双发：refresh(_:) 内部 refreshTasks inflight 复用机制保证幂等。
+    /// 三 cat 顺序刷新（timer / 首启非首次 / 系统唤醒 三入口）。
+    /// 可靠性优先：后台路径不 cross-cat 并发（旧峰值 QPS 3×5=15 靠"30 QPS"不变量保护，不变量一变整次失败）；
+    /// 顺序方案峰值仅 5，最坏冷启动 ~1-2 分钟，后台用户不在等屏幕可接受。
+    /// 跳过 auto-refresh 关闭的 cat 省 token。同 cat 不双发（refresh inflight 复用保证幂等）。
     private func refreshAllCatsSequentially() async {
         for cat in AINewsBar.Category.allCases {
             guard prefs.loadAutoRefreshEnabled(for: cat) else {
@@ -337,17 +276,14 @@ final class RefreshService: ObservableObject {
         }
     }
 
-    /// 旧无 cat 签名 fallback to .ai（保持旧 caller 调用兼容）
+    /// 旧无 cat 签名 fallback to .ai。
     func refreshIfNeeded() async {
         await refreshIfNeeded(.ai)
     }
 
-    /// v2: 全局未读计数（三 cat 累加，仅算 accepted=true）。menu bar 图标 badge 显示此值。
-    /// per-cat badge（如 "AI (3)"）由 CategoryTabBar 内 @Query 独立 count。
-    /// 必须 filter accepted=true：filter 拒绝/待筛的文章不应计入 (财报/新闻 cat 否则 badge 虚高)。
-    ///
-    /// P3 review：fetch 失败**不能**广播 count=0 —— badge 是用户可见状态，错发 0
-    /// 会让用户以为"全读完了"。改 strict fetch + 失败 log 不发通知，保留上一次 badge 值。
+    /// 全局未读计数（三 cat 累加，仅算 accepted=true）。menu bar 图标 badge 显示此值。
+    /// 必须 filter accepted=true：filter 拒绝/待筛的文章不计入（否则财报/新闻 badge 虚高）。
+    /// fetch 失败**不**广播 count=0（会让用户以为"全读完了"），改 strict fetch + 失败保留上一次值。
     func postUnreadCount(context: ModelContext) {
         do {
             let articles = try context.safeFetchOrThrow(
@@ -362,19 +298,15 @@ final class RefreshService: ObservableObject {
 
     // MARK: - Main pipeline (per-cat)
 
-    /// 刷新指定 cat。per-cat inflight 复用避免双 commit；旧 `refresh()` fallback to .ai。
+    /// 刷新指定 cat。per-cat inflight 复用避免双 commit。
     func refresh(_ cat: AINewsBar.Category = .ai) async {
         resetCrossedDayStateIfNeeded()
 
-        // 第十六轮 P2 review：startupError != nil 意味着 BuiltInFeeds.syncInto 失败，
-        // feed 表可能不完整或空。继续刷新只会跑出"无 feed → 0 文章 → lastRefreshDate
-        // 更新但 UI 空"的诡异状态，还会用一次空刷新抹掉 startupError 想表达的根因信号。
-        // AppDelegate 启动路径已 skip launchBackgroundRefreshIfNeeded，但 MenuBarView.onAppear /
-        // lazy tab-switch / handleSystemWake 等 UI/系统路径绕过那层保护 —— 必须在 service 层
-        // （所有刷新的统一底层入口）兜底，refreshIfNeeded 也经此守护。
-        // 守护放在 resetCrossedDayStateIfNeeded() 之后：跨日清理仍需执行让昨天 digest 失效。
-        // force* 重生成不走此路径（操作已有 snapshot，不依赖 feed 表），故不受影响。
-        // 未来若做显式"重试启动修复"入口，由该入口清 startupError 后再放行刷新。
+        // startupError != nil 意味 syncInto 失败、feed 表可能空：继续刷新只会跑出"0 文章 +
+        // lastRefreshDate 更新但 UI 空"且抹掉根因信号。AppDelegate 启动路径已 skip，但
+        // MenuBarView.onAppear / lazy tab-switch / handleSystemWake 绕过那层保护，故在 service 层兜底。
+        // 放在 resetCrossedDayStateIfNeeded() 之后：跨日清理仍需执行让昨天 digest 失效。
+        // force* 不走此路径（已有 snapshot，不依赖 feed 表），不受影响。
         guard startupError == nil else {
             Log.write("[Refresh][\(cat.rawValue)] startupError set, skip refresh to avoid polluting lastRefreshDate")
             return
@@ -398,10 +330,8 @@ final class RefreshService: ObservableObject {
         guard !state(for: cat).isRefreshing, let context = modelContext else { return }
         mutate(cat) { $0.isRefreshing = true; $0.lastError = nil }
 
-        // H3: 用 defer + 局部 capture 兜底 lastFetchErrorCount。
-        // 旧实现把"set lastFetchErrorCount"放在入库后；入库失败 return
-        // 时永远不执行，Footer 显示历史值（让用户以为 0 失败但实际全失败）。
-        // 任何 fetchAll 成功路径都先 capture 到 capturedErrors，defer 保证写入。
+        // defer + 局部 capture 兜底 lastFetchErrorCount：入库失败 return 时仍写入，
+        // 避免 Footer 显示历史值（让用户以为 0 失败但实际全失败）。
         var capturedFetchErrors: [String] = []
         defer {
             mutate(cat) {
@@ -414,8 +344,7 @@ final class RefreshService: ObservableObject {
         do {
             try cleanupOldArticles(context: context, category: cat, before: startOfToday)
         } catch {
-            // P2-A: cleanup 失败必须 rollback + 中止；旧"尽力而为"会留 pending delete
-            // 给后续 insert/AI 路径，commit 时一并 save 可能拖垮整次刷新或污染状态
+            // cleanup 失败必须 rollback + 中止：留 pending delete 给后续 insert/AI 路径会污染 commit。
             context.rollback()
             mutate(cat) { $0.lastError = "数据库清理旧文章失败，跳过本次刷新" }
             Log.write("[Refresh][\(cat.rawValue)] cleanup failed, abort: \(error)")
@@ -437,9 +366,8 @@ final class RefreshService: ObservableObject {
 
         let existingURLs: Set<String>
         do {
-            // 第十三轮 P3：用 URLNormalizer 归一化比对（保留 path / query 大小写 + 保留
-            // 全部 query；仅小写 scheme+host、去 fragment、单次尾斜杠）。旧裸字符串让
-            // "/foo" vs "/foo/" / Example.com vs example.com / #fragment 差异都重复入库。
+            // 用 URLNormalizer 归一化比对（小写 scheme+host、去 fragment、单次尾斜杠；保留 path/query 大小写
+            // 与全部 query）。裸字符串会让 "/foo" vs "/foo/" / 大小写 host / #fragment 差异都重复入库。
             existingURLs = Set(try context.safeFetchOrThrow(
                 FetchDescriptor<Article>(predicate: #Predicate { $0.category == catRaw })
             ).map { URLNormalizer.normalize($0.url) })
@@ -474,7 +402,7 @@ final class RefreshService: ObservableObject {
         }
         postUnreadCount(context: context)
 
-        // v2: Filter Stage 在 Summary 前（仅财报 cat 启用，其他 cat noop）
+        // Filter Stage 在 Summary 前（仅配了 filterPrompt 的 cat 启用，其他 noop）。
         guard await runFilterStage(cat: cat, context: context) else {
             Log.write("[Refresh][\(cat.rawValue)] abort AI pipeline because filter stage did not persist")
             return
@@ -484,9 +412,9 @@ final class RefreshService: ObservableObject {
         usage?.cleanupOlderThan(days: usageRetentionDays)
     }
 
-    // MARK: - Filter Stage (v2-multi-category)
+    // MARK: - Filter Stage
 
-    /// AI Filter：仅对配了 filterPrompt 的 cat 启用（first release：财报）。
+    /// AI Filter：仅对配了 filterPrompt 的 cat 启用。
     /// fetch accepted==nil && filterFailCount<3 → FilterPipeline → 写回 accepted / 累加 filterFailCount。
     private func runFilterStage(cat: AINewsBar.Category, context: ModelContext) async -> Bool {
         let config = CategoryConfig.for(cat)
@@ -519,16 +447,13 @@ final class RefreshService: ObservableObject {
         let pipeline = FilterPipeline(ai: ai, maxConcurrent: 5, promptTemplate: filterPrompt)
         let result = await pipeline.run(tasks: tasks, apiKey: apiKey, model: model)
 
-        // 写回 Article (用 id 重 fetch alive Article，避免持有跨 await @Model 引用)
-        // **P1 第七轮 review**：只有 classificationFailedIds 计入 filterFailCount。
-        // transientFailedIds（HTTP/网络/credential）保持 accepted=nil，下一轮 refresh
-        // 时 fetch pending 谓词 `accepted == nil && filterFailCount < maxFailures` 会
-        // 再次抓到这些文章重试。
+        // 写回 Article（用 id 重 fetch alive，避免持有跨 await @Model 引用）。
+        // 仅 classificationFailedIds 计入 filterFailCount；transientFailedIds（HTTP/网络/credential）
+        // 保持 accepted=nil，下轮 refresh 的 pending 谓词会再抓到重试，避免网络抖动永久 reject 财报文章。
         let acceptedSet = Set(result.acceptedIds)
         let rejectedSet = Set(result.rejectedIds)
         let classificationFailedSet = Set(result.classificationFailedIds)
-        // 写回需要 fetch 的 id 集合：accepted + rejected + classificationFailed。
-        // transient 不写 (article.accepted/filterFailCount 都不动)，省一次 fetch
+        // transient 不写（accepted/filterFailCount 都不动），省一次 fetch
         let writeIds = Array(acceptedSet) + Array(rejectedSet) + Array(classificationFailedSet)
 
         var persistSucceeded = true
@@ -569,23 +494,19 @@ final class RefreshService: ObservableObject {
             }
         }
 
-        // P1: transient 错误期间至少把 globalAIError 提示用户（不污染 per-cat
-        // unavailable，因为 transient 可能下一轮就自愈）
+        // transient 错误期间至少把 globalAIError 提示用户（不污染 per-cat unavailable，可能下轮自愈）。
         if let transientGlobal = result.firstTransientGlobalError {
             globalAIError = transientGlobal
         }
 
-        // P2 第七轮 review：filter 持久化成功后必须补 postUnreadCount。
-        // 财报文章入库时 accepted=nil，被 runRefresh 末尾的 postUnreadCount 过滤掉；
-        // 这里 accepted 变 true 后 badge 计数会变 — menu bar label 只听通知，
-        // 不补就 stale 到下次 refresh 或菜单打开（accepted=false 同样改变计数）。
+        // filter 持久化成功后补 postUnreadCount：财报文章入库时 accepted=nil 被过滤掉，
+        // 这里 accepted 变 true/false 改变计数，menu bar label 只听通知，不补就 stale。
         if persistSucceeded && !writeIds.isEmpty {
             postUnreadCount(context: context)
         }
 
-        // Token usage: accepted + rejected 都有 usage；
-        // classificationFailed 与 transientFailed 都不记 token（无 usage）；
-        // 仅 classificationFailed 记 recordFailure（transient 不算 AI 服务质量损坏）
+        // accepted + rejected 记 token；classificationFailed 与 transientFailed 不记 token；
+        // 仅 classificationFailed 记 recordFailure（transient 不算 AI 服务质量损坏）。
         for usageInfo in result.usages {
             usage?.record(scene: .filter, category: cat, model: model,
                           info: usageInfo, success: persistSucceeded)
@@ -711,10 +632,8 @@ final class RefreshService: ObservableObject {
         guard snapshot.summarizedCount >= 3 else { return }
 
         let s = state(for: cat)
-        // P2 第十一轮 review：coverage gate 必须同时挡 recommend 与 digest。
-        // 旧实现只挡 digest，5 篇文章只成功 3 篇摘要时仍会用混 nil-summary 的
-        // snapshot.all 跑推荐（RecommendEngine line 26 用 snapshot.all 不过滤 summary）。
-        // 产品规则是"摘要质量不足就不要生成派生内容"，推荐与日报对齐。
+        // coverage gate 同时挡 recommend 与 digest："摘要质量不足就不生成派生内容"。
+        // RecommendEngine 用 snapshot.summarized，coverage 不足意味候选含 nil-summary 文章。
         if !coverage {
             Log.write("[Recommend][\(catRaw)] skip — coverage below threshold")
         } else if RefreshDecision.shouldRegenerateRecommend(
@@ -806,13 +725,11 @@ final class RefreshService: ObservableObject {
         prefs.saveDigest(content: outcome.content, date: outcome.generatedAt, for: cat)
         prefs.saveDigestArticleCount(outcome.articleCount, for: cat)
         usage?.record(scene: .digest, category: cat, model: model, info: outcome.usage)
-        // 注意：不重置 aiAvailability —— Recommend 设的 .unavailable 应保留
+        // 不重置 aiAvailability —— Recommend 设的 .unavailable 应保留
     }
 
-    /// 摘要原子持久化：safeSaveOrThrow 失败用 context.rollback() 撤回内存改动 +
-    /// 设 .unavailable + token 记 success=false。
-    /// 不再手动 fetch+nil+save"舞蹈"——SwiftData rollback 把内存改动回滚到 last save，
-    /// 保证内存/磁盘一致；手动 set nil 再 save 失败可能导致两层永久错位。
+    /// 摘要原子持久化：safeSaveOrThrow 失败用 context.rollback() 撤回内存改动（保证内存/磁盘一致）
+    /// + 设 .unavailable + token 记 success=false。
     private func commitSummaries(
         cat: AINewsBar.Category, result: SummaryPipeline.Result, model: String,
         context: ModelContext
@@ -839,9 +756,7 @@ final class RefreshService: ObservableObject {
         }
 
         for item in result.completed {
-            // P3-A: 走 helper record(info:success:) 而非 root record(input:output:success:)，
-            // 让 persistSucceeded=false 时 token 自动归零（P3-B helper 契约统一）。
-            // 旧实现直接拆 inputTokens/outputTokens 调 root API 绕过了归零。
+            // 走 helper record(info:success:)：persistSucceeded=false 时 token 自动归零。
             usage?.record(
                 scene: .summary, category: cat, model: model,
                 info: item.usage, success: persistSucceeded
@@ -891,8 +806,8 @@ final class RefreshService: ObservableObject {
         return (rawResults, errors)
     }
 
-    /// v2: 双重去重（existingURLs + seenURLs）；丢 nil pubDate；
-    /// article.category 从 feed 派生；未配 filter 或 feed.skipFilter 时 accepted 直接为 true。
+    /// 双重去重（existingURLs + seenURLs）；丢 nil pubDate；article.category 从 feed 派生；
+    /// 未配 filter 或 feed.skipFilter 时 accepted 直接为 true。
     private func mergeNewArticles(
         cat: AINewsBar.Category,
         rawResults: [FeedResult],
@@ -904,11 +819,9 @@ final class RefreshService: ObservableObject {
         var newArticles: [Article] = []
         var seenURLs: Set<String> = []
         for result in rawResults {
-            // accepted 初值规则（见 Article.accepted 注释）
             let acceptedAtInsert: Bool? = (!needFilter || result.feedSkipFilter) ? true : nil
             for raw in result.articles {
-                // 第十三轮 P3：归一化后比对；原 raw.url 仍用于存储（保留追踪参数，浏览器
-                // 打开时不破坏目标页跟踪能力）。归一化只影响"是否视为同一篇"。
+                // 归一化后比对（仅判定"是否同一篇"）；存储仍用原 raw.url 保留追踪参数。
                 let key = URLNormalizer.normalize(raw.url)
                 guard let pubDate = raw.publishedAt,
                       !existingURLs.contains(key),
@@ -929,22 +842,19 @@ final class RefreshService: ObservableObject {
 
     // MARK: - Private: misc
 
-    /// M3: 纯查询 —— 读 prefs 返回 credentials；无副作用，可测可复用。
-    /// 不设 globalAIError / aiAvailability。caller 若需要"缺 key 时进入失败状态"，
-    /// 走 ensureCredentials(cat:)。
+    /// 纯查询：读 prefs 返回 credentials，无副作用。缺 key 返回 nil。
     private func currentCredentials() -> (apiKey: String, model: String)? {
         let key = prefs.getAPIKey() ?? ""
         guard !key.isEmpty else { return nil }
         return (key, prefs.getModel())
     }
 
-    /// M3: 命令式 —— 在 currentCredentials 上叠加副作用：缺 key 时设 global +
-    /// per-cat unavailable；存在则清掉之前可能被 set 的 invalidAPIKey error。
-    /// 名字明示"会改 state"，与 query-only 的 currentCredentials 区分。
+    /// 命令式：在 currentCredentials 上叠加副作用 —— 缺 key 时设 globalAIError + per-cat unavailable
+    /// （reason 用 missingCredentialReason，applyCredentialChange 依赖此字面值精确匹配）；
+    /// 存在则清掉之前的 invalidAPIKey error。
     private func ensureCredentials(cat: AINewsBar.Category) -> (apiKey: String, model: String)? {
         guard let creds = currentCredentials() else {
             globalAIError = .invalidAPIKey
-            // applyCredentialChange 依赖此 reason 字面值精确匹配（Self.missingCredentialReason）
             mutate(cat) { $0.aiAvailability = .unavailable(Self.missingCredentialReason) }
             return nil
         }
@@ -982,16 +892,15 @@ final class RefreshService: ObservableObject {
         isSummarizing = !activeSummaryPipelineCats.isEmpty
     }
 
-    /// 跨日全 cat 重置：lastResetCheckDate 不在今天时执行。
-    /// 调用点：refresh / forceRegenerate* / refreshIfNeeded / timer / NSWorkspace 唤醒。幂等。
+    /// 跨日全 cat 重置：lastResetCheckDate 不在今天时执行。幂等。
+    /// 调用点：refresh / forceRegenerate* / refreshIfNeeded / timer / 系统唤醒。
     func resetCrossedDayStateIfNeeded() {
         guard let context = modelContext else { return }
         if let last = lastResetCheckDate, Calendar.current.isDateInToday(last) { return }
 
         let startOfToday = Calendar.current.startOfDay(for: Date())
-        // P2-A: cleanup 失败必须 rollback + 不推进 lastResetCheckDate +
-        // 不清 UI/prefs。旧 tolerant 路径会让 fetch 失败被当空结果，假装清成功
-        // 后推进 guard 到今天 → 当天不再重试跨日清理，旧文章可能继续显示。
+        // cleanup 失败必须 rollback + 不推进 lastResetCheckDate：否则 fetch 失败被当空结果假装清成功，
+        // 推进 guard 到今天 → 当天不再重试跨日清理，旧文章可能继续显示。
         do {
             try cleanupOldArticles(context: context, before: startOfToday)
         } catch {
@@ -1000,12 +909,8 @@ final class RefreshService: ObservableObject {
             return
         }
 
-        // 走到这里说明：lastResetCheckDate 要么 nil（首启），要么非今日（真跨日）。
-        // 首启 case：loadPersistedState 已把"非今日 prefs"清掉，内存里 lastRefreshDate
-        // 等字段要么是今日要么是 nil，复检内存状态永远 false 故无意义。
-        // 真跨日 case：必清状态。直接以 lastResetCheckDate != nil 区分：
-        //   - nil（首启）：只清磁盘旧文章 + set lastResetCheckDate；不动 prefs/UI 状态
-        //   - 非 nil 且非今日（真跨日）：全清
+        // lastResetCheckDate nil（首启）：loadPersistedState 已清非今日 prefs，内存状态无需再清。
+        // 非 nil 且非今日（真跨日）：必清状态。故以 lastResetCheckDate != nil 区分。
         let shouldClearState = (lastResetCheckDate != nil)
 
         if shouldClearState {
@@ -1029,10 +934,8 @@ final class RefreshService: ObservableObject {
         Log.write("[Refresh] cross-day check complete (clearedState=\(shouldClearState))")
     }
 
-    /// per-cat 清旧文章（runRefresh 内用，仅清该 cat）。
-    /// 严格版：fetch/save 失败抛出，让 caller 决定 rollback + 中止后续流程。
-    /// 旧"尽力而为"语义会留下 pending delete 给后续 insert/AI 路径，最终 commit 时一并 save
-    /// 可能拖累或冲突；这里要么成功要么干净中止。
+    /// per-cat 清旧文章（runRefresh 内用）。严格版：fetch/save 失败抛出，让 caller rollback + 中止，
+    /// 避免留 pending delete 给后续路径。
     private func cleanupOldArticles(
         context: ModelContext, category: AINewsBar.Category, before date: Date
     ) throws {
@@ -1047,10 +950,7 @@ final class RefreshService: ObservableObject {
         try context.safeSaveOrThrow()
     }
 
-    /// 全 cat 清旧文章（跨日重置内用）。
-    /// 严格版（与 per-cat 对齐）：失败抛出，让 caller 决定 rollback + 不推进
-    /// lastResetCheckDate，避免 tolerant 路径在 fetch 失败时假装清成功 + 推进
-    /// guard 导致当天不再重试跨日清理。
+    /// 全 cat 清旧文章（跨日重置内用）。严格版（与 per-cat 对齐）：失败抛出让 caller 不推进 lastResetCheckDate。
     private func cleanupOldArticles(context: ModelContext, before date: Date) throws {
         let old = try context.safeFetchOrThrow(
             FetchDescriptor<Article>(predicate: #Predicate { $0.publishedAt < date })

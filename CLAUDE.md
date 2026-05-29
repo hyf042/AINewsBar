@@ -46,6 +46,7 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-29 (四) | 第十八轮 review 第 2 项：FeedsSettingsView.summaryText 以 filteredFeeds id 集合做交集，只统计当前可见 feed 结果；治"同 cat 内删源/加源/检测中列表变化残留孤儿 id 被汇总继续统计"；测试持平（纯 view 层） | — |
 | 2026-05-29 (五) | 第十九轮 review 第 1 项：APISettingsView 保存按钮禁用条件对齐检测（`trimmedAPIKey.isEmpty \|\| effectiveModel.isEmpty \|\| isChecking`）；治"自定义模型为空按钮可点却静默无事 / 检测中再点并发触发"；测试持平（纯 view 层） | `c5e73fb` |
 | 2026-05-29 (六) | 第十九轮 review 第 2 项：AddFeedSheet + APISettingsView 异步校验加 request identity（generation 令牌）；治"用户请求期间改输入后旧请求仍回写 UI / 提交旧草稿 / 写旧 key+model 进 prefs"；测试持平（纯 view 层） | `18d2433` |
+| 2026-05-29 (七) | **Linus 系统性 review + 重构第 1 项**：RefreshService 注释精简（删 70+ 处"第X轮 review"历史考古注释，1103→1003 行；逻辑零变更，历史已在 git log + 本表保留）。结论：facade 1103 行肥肉 80% 是注释而非逻辑，去注释后 ~886 行内聚于"刷新编排"单一职责，强拆会增间接层故不拆。流程建议：review 准入门槛改为"能描述真实触发路径才改"，第 13 轮后多为理论竞态边际收益趋零；测试 252 持平 | — |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -227,7 +228,7 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 - `App/AppDelegate.swift` — **冷启动 entry**：`static let container` + `applicationDidFinishLaunching` 接管所有 startup + NSWorkspace.didWakeNotification 监听 + 二次失败 in-memory fallback
 
 ### Services（外观 + 组件）
-- `Services/RefreshService.swift` — **外观** (~890 行 v2 多分类后)：`@Published private(set) states: [Category: CategoryState]` per-cat dict；公开 API：`refresh(_:)` / `forceRegenerate{Recommend,Digest}(_:)` / `refreshIfNeeded(_:)` / `handleSystemWake()` / `markAvailability(_:for:)` / `state(for:)` / `isSummarizing(category:)` / `stop()`；DEBUG-only `_testMutate(for:_:)`；per-cat `refreshTasks` inflight 复用；`refreshAllCatsConcurrently` TaskGroup（H5）；`runRefresh` defer + capturedFetchErrors（H3）；`commitSummaries` 用 `context.rollback()`（H2）；`currentCredentials()` / `ensureCredentials(cat:)` CQS（M3）
+- `Services/RefreshService.swift` — **外观** (~1000 行；2026-05-29 注释精简后)：`@Published private(set) states: [Category: CategoryState]` per-cat dict；公开 API：`refresh(_:)` / `forceRegenerate{Recommend,Digest}(_:)` / `refreshIfNeeded(_:)` / `handleSystemWake()` / `markAvailability(_:for:)` / `state(for:)` / `isSummarizing(category:)` / `stop()`；DEBUG-only `_testMutate(for:_:)`；per-cat `refreshTasks` inflight 复用；`refreshAllCatsSequentially`（第四轮 review 由 Concurrently 改顺序，峰值 QPS 15→5）；`runRefresh` defer + capturedFetchErrors（H3）；`commitSummaries` 用 `context.rollback()`（H2）；`currentCredentials()` / `ensureCredentials(cat:)` CQS（M3）
 - `Services/SummaryPipeline.swift` — 摘要并发管道（5 路）；多点 `Task.isCancelled` checkpoint；`.cancelled` 不计 failed
 - `Services/RecommendEngine.swift` / `DigestEngine.swift` — 纯执行器；Outcome 含 UsageInfo
 - `Services/FilterPipeline.swift`（v2）— 5 路并发 filter；同 SummaryPipeline 结构；返回 acceptedIds / rejectedIds / failedIds + usages

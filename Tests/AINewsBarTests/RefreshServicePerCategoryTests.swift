@@ -238,4 +238,73 @@ final class RefreshServicePerCategoryTests: XCTestCase {
         XCTAssertNotNil(service.states[.earnings])
         XCTAssertNotNil(service.states[.news])
     }
+
+    // MARK: - hasNewArticles 语义：可见新文章 vs RSS 入库数
+
+    /// 财报 cat 本轮新抓文章全部被 filter reject 时，没有任何用户可见的新内容，
+    /// 不应触发 recommend/digest 重生（旧实现用 RSS 入库数当 hasNewArticles，会白烧 token）。
+    private func seedVisibleEarningsHistory(count: Int = 5) {
+        for i in 0..<count {
+            let a = Article(
+                title: "Old\(i)", url: "https://e/old\(i)",
+                publishedAt: Date(), feedID: UUID(), feedTitle: "F",
+                category: .earnings, accepted: true
+            )
+            a.aiSummary = "s\(i)"
+            context.insert(a)
+        }
+        try? context.save()
+        // 预置已有推荐 + 已有日报（4 小时前，digest 时间窗已过），count 对齐历史数：
+        // 这样只剩 hasNewArticles 一条能触发重生，精准暴露语义错误。
+        service._testMutate(for: .earnings) {
+            $0.recommendedArticleIDs = [UUID()]   // isEmpty=false
+            $0.recommendArticleCount = count
+            $0.dailyDigest = "old digest"
+            $0.lastDigestDate = Date().addingTimeInterval(-4 * 3600)
+            $0.digestArticleCount = count
+        }
+    }
+
+    func testEarningsAllFilterRejectedDoesNotRegenerateDerivedContent() async {
+        prefs.apiKey = "test-key"
+        seedVisibleEarningsHistory()
+
+        let feed = seedFeed("https://earn.com/feed", title: "Earn", category: .earnings)
+        rss.setSuccess(feed.url, [
+            makeRaw("https://e/new1", title: "New1"),
+            makeRaw("https://e/new2", title: "New2"),
+        ])
+        ai.classifyProvider = { _, _ in false }   // 全 reject
+
+        let recBefore = ai.recommendCallCount
+        let digBefore = ai.digestCallCount
+
+        await service.refresh(.earnings)
+
+        XCTAssertEqual(ai.classifyCallCount, 2, "2 篇新文章应都过 filter")
+        XCTAssertEqual(ai.recommendCallCount, recBefore,
+                       "全 reject 无可见新内容，不应重新生成推荐")
+        XCTAssertEqual(ai.digestCallCount, digBefore,
+                       "全 reject 无可见新内容，不应重新生成日报")
+    }
+
+    /// 反向保护：filter 部分 accept 时（有可见新内容）仍应重生，避免修复过度把正常 case 挡掉。
+    func testEarningsSomeFilterAcceptedRegeneratesRecommend() async {
+        prefs.apiKey = "test-key"
+        seedVisibleEarningsHistory()
+
+        let feed = seedFeed("https://earn.com/feed", title: "Earn", category: .earnings)
+        rss.setSuccess(feed.url, [
+            makeRaw("https://e/new1", title: "Accept"),
+            makeRaw("https://e/new2", title: "Reject"),
+        ])
+        ai.classifyProvider = { title, _ in title == "Accept" }   // 仅 1 篇通过
+
+        let recBefore = ai.recommendCallCount
+
+        await service.refresh(.earnings)
+
+        XCTAssertGreaterThan(ai.recommendCallCount, recBefore,
+                             "有新文章通过 filter（可见新内容），应重新生成推荐")
+    }
 }

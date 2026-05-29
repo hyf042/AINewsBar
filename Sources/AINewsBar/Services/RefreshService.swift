@@ -384,6 +384,10 @@ final class RefreshService: ObservableObject {
             existingURLs: existingURLs,
             startOfToday: startOfToday
         )
+        // "入库即可见"的新文章数：无 filter cat 全部、有 filter cat 的 skipFilter 源
+        // （accepted=true at insert）。待 filter（accepted=nil）的不计入，由 runFilterStage
+        // 的 newlyAccepted 补。在 filterStage 的 await 前算成 Int，避免跨 await 持有 @Model（#23）。
+        let newVisibleAtInsert = newArticles.reduce(0) { $0 + ($1.accepted == true ? 1 : 0) }
 
         if !newArticles.isEmpty {
             newArticles.forEach { context.insert($0) }
@@ -403,22 +407,37 @@ final class RefreshService: ObservableObject {
         postUnreadCount(context: context)
 
         // Filter Stage 在 Summary 前（仅配了 filterPrompt 的 cat 启用，其他 noop）。
-        guard await runFilterStage(cat: cat, context: context) else {
+        let filterOutcome = await runFilterStage(cat: cat, context: context)
+        guard filterOutcome.persisted else {
             Log.write("[Refresh][\(cat.rawValue)] abort AI pipeline because filter stage did not persist")
             return
         }
 
-        await processAI(cat: cat, context: context, hasNewArticles: !newArticles.isEmpty)
+        // hasNewArticles 语义 = "本轮新增的用户可见文章"，不是 RSS 入库数：财报 cat 新抓全被
+        // filter reject 时无可见新内容，不应强制重生 recommend/digest 烧 token。
+        let hasNewVisibleArticles = (newVisibleAtInsert + filterOutcome.newlyAccepted) > 0
+        await processAI(cat: cat, context: context, hasNewArticles: hasNewVisibleArticles)
         usage?.cleanupOlderThan(days: usageRetentionDays)
     }
 
     // MARK: - Filter Stage
 
+    /// Filter stage 产出：persisted 决定是否继续 AI pipeline；newlyAccepted 是本轮 filter 新判
+    /// accepted=true 的篇数 —— 代表"本轮新增的用户可见文章"，供派生内容触发决策（避免全 reject 时白烧 token）。
+    private struct FilterStageOutcome {
+        let persisted: Bool
+        let newlyAccepted: Int
+        /// noop / 无 pending：放行后续 AI，无新可见内容。
+        static let proceed = FilterStageOutcome(persisted: true, newlyAccepted: 0)
+        /// 持久化失败：中止 AI pipeline。
+        static let abort = FilterStageOutcome(persisted: false, newlyAccepted: 0)
+    }
+
     /// AI Filter：仅对配了 filterPrompt 的 cat 启用。
     /// fetch accepted==nil && filterFailCount<3 → FilterPipeline → 写回 accepted / 累加 filterFailCount。
-    private func runFilterStage(cat: AINewsBar.Category, context: ModelContext) async -> Bool {
+    private func runFilterStage(cat: AINewsBar.Category, context: ModelContext) async -> FilterStageOutcome {
         let config = CategoryConfig.for(cat)
-        guard let filterPrompt = config.filterPrompt else { return true }
+        guard let filterPrompt = config.filterPrompt else { return .proceed }
 
         let catRaw = cat.rawValue
         let maxFailures = filterMaxFailures
@@ -432,10 +451,10 @@ final class RefreshService: ObservableObject {
         } catch {
             Log.write("[Filter][\(catRaw)] fetch pending failed: \(error)")
             mutate(cat) { $0.lastError = "数据库查询失败，跳过筛选" }
-            return false
+            return .abort
         }
-        guard !pending.isEmpty else { return true }
-        guard let (apiKey, model) = ensureCredentials(cat: cat) else { return false }
+        guard !pending.isEmpty else { return .proceed }
+        guard let (apiKey, model) = ensureCredentials(cat: cat) else { return .abort }
 
         let tasks = pending.map {
             FilterPipeline.Task(
@@ -514,7 +533,11 @@ final class RefreshService: ObservableObject {
         for _ in result.classificationFailedIds {
             usage?.recordFailure(scene: .filter, category: cat, model: model)
         }
-        return persistSucceeded
+        // newlyAccepted = 本轮 filter 判 accepted=true 数（持久化失败时无意义，置 0）。
+        return FilterStageOutcome(
+            persisted: persistSucceeded,
+            newlyAccepted: persistSucceeded ? acceptedSet.count : 0
+        )
     }
 
     // MARK: - Force regenerate (per-cat)

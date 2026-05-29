@@ -46,7 +46,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-29 (四) | 第十八轮 review 第 2 项：FeedsSettingsView.summaryText 以 filteredFeeds id 集合做交集，只统计当前可见 feed 结果；治"同 cat 内删源/加源/检测中列表变化残留孤儿 id 被汇总继续统计"；测试持平（纯 view 层） | — |
 | 2026-05-29 (五) | 第十九轮 review 第 1 项：APISettingsView 保存按钮禁用条件对齐检测（`trimmedAPIKey.isEmpty \|\| effectiveModel.isEmpty \|\| isChecking`）；治"自定义模型为空按钮可点却静默无事 / 检测中再点并发触发"；测试持平（纯 view 层） | `c5e73fb` |
 | 2026-05-29 (六) | 第十九轮 review 第 2 项：AddFeedSheet + APISettingsView 异步校验加 request identity（generation 令牌）；治"用户请求期间改输入后旧请求仍回写 UI / 提交旧草稿 / 写旧 key+model 进 prefs"；测试持平（纯 view 层） | `18d2433` |
-| 2026-05-29 (七) | **Linus 系统性 review + 重构第 1 项**：RefreshService 注释精简（删 70+ 处"第X轮 review"历史考古注释，1103→1003 行；逻辑零变更，历史已在 git log + 本表保留）。结论：facade 1103 行肥肉 80% 是注释而非逻辑，去注释后 ~886 行内聚于"刷新编排"单一职责，强拆会增间接层故不拆。流程建议：review 准入门槛改为"能描述真实触发路径才改"，第 13 轮后多为理论竞态边际收益趋零；测试 252 持平 | — |
+| 2026-05-29 (七) | **Linus 系统性 review + 重构第 1 项**：RefreshService 注释精简（删 70+ 处"第X轮 review"历史考古注释，1103→1003 行；逻辑零变更，历史已在 git log + 本表保留）。结论：facade 1103 行肥肉 80% 是注释而非逻辑，去注释后 ~886 行内聚于"刷新编排"单一职责，强拆会增间接层故不拆。流程建议：review 准入门槛改为"能描述真实触发路径才改"，第 13 轮后多为理论竞态边际收益趋零；测试 252 持平 | `d6ec4e5` |
+| 2026-05-29 (八) | 第二十轮 review P2：hasNewArticles 语义修复（"可见新文章" vs "RSS 入库数"）；runFilterStage 返回 newlyAccepted，财报 cat 本轮新抓全被 filter reject 时不再白烧 recommend/digest token；TDD 加 2 测试（全 reject 不重生 + 部分 accept 仍重生），测试 252→254 | — |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -188,6 +189,7 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | summaryText 交集当前可见 feed（第十八轮）| `summaryText` 先 `Set(filteredFeeds.map(\.id))`，只统计 checkResults 中仍可见的 id | checkResults 是 [UUID: CheckStatus] 字典，切 cat 会清空但同 cat 内删源/加源/检测中列表变化会残留孤儿 id → 底部"x/y 个源正常"把已删源继续算进去。以可见 id 做交集是单点防御，胜过在每条删除/添加 mutation 路径散布清理（DRY + 免检测竞态）|
 | 保存按钮门控对齐检测（第十九轮 P3-1）| APISettingsView 保存按钮 disabled 由 `trimmedAPIKey.isEmpty` 改为 `trimmedAPIKey.isEmpty \|\| effectiveModel.isEmpty \|\| isChecking`，与"检测可用性"按钮一致 | 旧条件只判 key，但 `saveAndCheck()` 内 `guard !model.isEmpty` 还要求 model 非空 → 自定义模型为空时按钮可点却静默 return；检测中（.checking）未禁用 → 再点并发触发第二次 testConnection。UI 门控必须与业务 guard 同契约 |
 | 异步校验 request identity（第十九轮 P3-2）| AddFeedSheet（`validationGeneration`，仅 URL onChange 递增）+ APISettingsView（`checkGeneration`，4 处输入 onChange 经 `invalidateCheck()` 递增）；请求起始捕获 generation，await 返回后 `guard generation == 当前` 否则丢弃 | 第十七/十二轮已把 draft/key+model 原子捕获，但**回写时**无请求身份：用户在 RSS/testConnection 请求期间改输入（onChange 重置状态让按钮重新可点），旧请求返回仍会回写 UI、`addFeed(旧 draft)`、把旧 key/model 写进 prefs 并显示成功。同第十八轮 categoryGeneration 模式扩展到异步校验。关键：令牌递增处已复位状态为 `.idle`，过期 `return` 不回写不会让 UI 卡"检测中"。AddFeedSheet 仅 URL 失效——title/category 中途变更属第十七轮原子草稿"提交点击瞬间所选"既定语义 |
+| hasNewArticles 语义=可见新文章（第二十轮 P2）| `runFilterStage` 返回类型 `Bool` → `FilterStageOutcome{persisted, newlyAccepted}`；`runRefresh` 用 `newVisibleAtInsert`（入库即 accepted=true 数）`+ newlyAccepted`（filter 本轮判 true 数）`> 0` 取代 `!newArticles.isEmpty` 喂给 processAI | 旧实现把"RSS 入库数"当 hasNewArticles：财报这类有 filter 的 cat，本轮新抓文章全被 reject 时无任何用户可见新内容，却仍因 hasNewArticles=true 在 `shouldRegenerateRecommend` 首行强制重生推荐 + 时间窗满足时重生 digest，后台白烧 token。无 filter cat（AI/news）新文章 insert 即 accepted=true，`newVisibleAtInsert==newArticles.count`、`newlyAccepted=0`，等价旧逻辑零行为变更。newVisibleAtInsert 在 filterStage 的 await 前算成 Int 避免跨 await 持有 @Model（#23） |
 
 ---
 

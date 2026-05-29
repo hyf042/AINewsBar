@@ -17,6 +17,11 @@ struct AddFeedSheet: View {
     /// 第十七轮 P2：强制添加路径的待保存草稿。validateAndAdd 点击瞬间捕获，
     /// alert "仍要添加" 只保存这一份，不重读可能已被用户改动的当前 UI 状态。
     @State private var pendingDraft: FeedDraft?
+    /// 第十九轮 P3：请求身份令牌。validateAndAdd 异步校验期间用户改 URL（line 55 重置
+    /// .idle 让按钮重新可点）后，旧请求返回不应再回写状态或 addFeed(draft) 提交旧草稿。
+    /// 点击时捕获 generation，await 返回后比对，过期即丢弃。仅 URL 变更递增 —— title/
+    /// category 中途变更属第十七轮原子草稿"提交点击瞬间所选"的既定语义，不在失效范围。
+    @State private var validationGeneration = 0
 
     /// 点击"添加"瞬间捕获的不可变草稿（已 trim）。校验、去重、存盘全程只用它，
     /// 避免"校验通过 A，RSS 请求期间用户改成 B，实际保存 B"的非原子边界。
@@ -52,7 +57,10 @@ struct AddFeedSheet: View {
             LabeledContent("RSS URL") {
                 TextField("https://example.com/feed.xml", text: $url)
                     .textFieldStyle(.roundedBorder)
-                    .onChange(of: url) { _, _ in validationStatus = .idle }
+                    .onChange(of: url) { _, _ in
+                        validationStatus = .idle
+                        validationGeneration += 1   // 使在途 validateAndAdd 结果失效
+                    }
             }
             LabeledContent("分类") {
                 Picker("", selection: $selectedCategory) {
@@ -121,11 +129,15 @@ struct AddFeedSheet: View {
         // 第十七轮 P2：点击瞬间捕获 draft（已 trim），整个异步流程只认这份。
         // 用户在 RSS 请求期间改 URL/标题/分类不再影响校验与保存的一致性。
         let draft = FeedDraft(url: trimmedURL, title: trimmedTitle, category: selectedCategory)
+        // 第十九轮 P3：捕获请求身份；await 返回后比对，丢弃用户改 URL 后的过期回写。
+        let generation = validationGeneration
         validationStatus = .checking
         do {
             // 用 draft.url 校验：与最终存盘 URL 完全一致，避免"校验通过 X 但存了 trim(X)"
             // 或反向"校验失败 X 但用户强制添加后存了 trim(X)"两类不一致
             let articles = try await RSSService.shared.fetchRawArticles(feedURL: draft.url)
+            // 过期请求：递增处已复位 validationStatus=.idle，此处直接丢弃不回写/不提交。
+            guard generation == validationGeneration else { return }
             if articles.isEmpty {
                 validationStatus = .failure("URL 可达但未返回任何文章")
                 pendingDraft = draft
@@ -135,6 +147,7 @@ struct AddFeedSheet: View {
                 addFeed(draft)
             }
         } catch {
+            guard generation == validationGeneration else { return }
             validationStatus = .failure(error.localizedDescription)
             pendingDraft = draft
             showForceAddAlert = true

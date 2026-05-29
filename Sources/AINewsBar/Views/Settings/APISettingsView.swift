@@ -7,6 +7,11 @@ struct APISettingsView: View {
     @State private var useCustomModel = false
     @State private var customModel = ""
     @State private var checkStatus: CheckStatus = .idle
+    /// 第十九轮 P3：请求身份令牌。saveAndCheck/checkConnection 异步期间用户改输入
+    /// （onChange 重置 checkStatus=.idle 让按钮重新可点）后，旧请求返回不应再回写
+    /// checkStatus，更不应在 saveAndCheck 里把旧 key/model 写进 prefs。请求起始捕获
+    /// generation，await 返回后比对，过期即丢弃。所有重置 checkStatus 的 onChange 同步递增。
+    @State private var checkGeneration = 0
     @EnvironmentObject private var refreshService: RefreshService
 
     private static let modelGroups: [(brand: String, models: [String])] = [
@@ -71,7 +76,7 @@ struct APISettingsView: View {
                     }
                 }
                 Toggle("使用自定义模型", isOn: $useCustomModel)
-                    .onChange(of: useCustomModel) { _, _ in checkStatus = .idle }
+                    .onChange(of: useCustomModel) { _, _ in invalidateCheck() }
             }
 
             Section {
@@ -93,9 +98,17 @@ struct APISettingsView: View {
         .onAppear { loadSettings() }
         // 第十二轮 P3：输入变化即重置 checkStatus，避免"检测成功后改了输入仍显示已可用"误导。
         // useCustomModel 已在 Section 内有 onChange；这里补齐另三个输入源。
-        .onChange(of: apiKey) { _, _ in checkStatus = .idle }
-        .onChange(of: customModel) { _, _ in checkStatus = .idle }
-        .onChange(of: selectedModel) { _, _ in checkStatus = .idle }
+        // 第十九轮 P3：统一走 invalidateCheck() —— 重置状态同时递增 generation 使在途请求失效。
+        .onChange(of: apiKey) { _, _ in invalidateCheck() }
+        .onChange(of: customModel) { _, _ in invalidateCheck() }
+        .onChange(of: selectedModel) { _, _ in invalidateCheck() }
+    }
+
+    /// 第十九轮 P3：重置检测状态并递增请求令牌，使在途的 saveAndCheck/checkConnection
+    /// 回写失效。所有"用户改输入"的 onChange 统一调用，保证状态复位与令牌递增不漂移。
+    private func invalidateCheck() {
+        checkStatus = .idle
+        checkGeneration += 1
     }
 
     @ViewBuilder
@@ -146,9 +159,13 @@ struct APISettingsView: View {
         let key = trimmedAPIKey
         let model = effectiveModel
         guard !key.isEmpty, !model.isEmpty else { return }
+        // 第十九轮 P3：捕获请求身份；await 返回后比对，丢弃用户改输入后的过期回写。
+        let generation = checkGeneration
         checkStatus = .checking
         do {
             try await BailianService.shared.testConnection(apiKey: key, model: model)
+            // 过期请求：用户已改输入，绝不持久化旧 key/model（递增处已复位 checkStatus=.idle）。
+            guard generation == checkGeneration else { return }
             // 验证通过 → 持久化 + 触发主流程
             PreferencesService.shared.saveAPIKey(key)
             PreferencesService.shared.saveModel(model)
@@ -157,6 +174,7 @@ struct APISettingsView: View {
             let service = refreshService
             Task { await service.applyCredentialChange() }
         } catch {
+            guard generation == checkGeneration else { return }
             // 验证失败 → 不动 prefs，也不动 globalAIError
             // 候选值与主流程持久化值是两份数据，状态隔离
             checkStatus = .failure(error.localizedDescription)
@@ -176,11 +194,15 @@ struct APISettingsView: View {
         let key = trimmedAPIKey
         let model = effectiveModel
         guard !key.isEmpty, !model.isEmpty else { return }
+        // 第十九轮 P3：捕获请求身份；用户改输入后旧检测结果不应回写覆盖当前 UI。
+        let generation = checkGeneration
         checkStatus = .checking
         do {
             try await BailianService.shared.testConnection(apiKey: key, model: model)
+            guard generation == checkGeneration else { return }
             checkStatus = .success(1)
         } catch {
+            guard generation == checkGeneration else { return }
             checkStatus = .failure(error.localizedDescription)
         }
     }

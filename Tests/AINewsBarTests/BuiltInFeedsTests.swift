@@ -38,15 +38,15 @@ final class BuiltInFeedsTests: XCTestCase {
 
     // MARK: - Multi-Category (v2)
 
-    func testTotalCountIs27() {
-        XCTAssertEqual(BuiltInFeeds.all.count, 27, "v2 内置源总数应为 27 (11 AI + 8 财报 + 8 新闻)")
+    func testTotalCountIs26() {
+        XCTAssertEqual(BuiltInFeeds.all.count, 26, "v2 内置源总数应为 26 (11 AI + 8 财报 + 7 新闻)")
     }
 
     func testCategoryDistribution() {
         let byCat = Dictionary(grouping: BuiltInFeeds.all, by: \.category)
         XCTAssertEqual(byCat[.ai]?.count, 11, "AI tab 应有 11 个内置源")
         XCTAssertEqual(byCat[.earnings]?.count, 8, "财报 tab 应有 8 个内置源")
-        XCTAssertEqual(byCat[.news]?.count, 8, "新闻 tab 应有 8 个内置源")
+        XCTAssertEqual(byCat[.news]?.count, 7, "新闻 tab 应有 7 个内置源")
     }
 
     func testMakeFeedsPropagatesCategory() {
@@ -56,7 +56,7 @@ final class BuiltInFeedsTests: XCTestCase {
         let newsCount = feeds.filter { $0.category == Category.news.rawValue }.count
         XCTAssertEqual(aiCount, 11)
         XCTAssertEqual(earningsCount, 8)
-        XCTAssertEqual(newsCount, 8)
+        XCTAssertEqual(newsCount, 7)
     }
 
     // MARK: - 第十四轮 P3：URLNormalizer 应用于 syncInto

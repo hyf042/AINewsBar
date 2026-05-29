@@ -49,6 +49,7 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-29 (七) | **Linus 系统性 review + 重构第 1 项**：RefreshService 注释精简（删 70+ 处"第X轮 review"历史考古注释，1103→1003 行；逻辑零变更，历史已在 git log + 本表保留）。结论：facade 1103 行肥肉 80% 是注释而非逻辑，去注释后 ~886 行内聚于"刷新编排"单一职责，强拆会增间接层故不拆。流程建议：review 准入门槛改为"能描述真实触发路径才改"，第 13 轮后多为理论竞态边际收益趋零；测试 252 持平 | `d6ec4e5` |
 | 2026-05-29 (八) | 第二十轮 review P2：hasNewArticles 语义修复（"可见新文章" vs "RSS 入库数"）；runFilterStage 返回 newlyAccepted，财报 cat 本轮新抓全被 filter reject 时不再白烧 recommend/digest token；TDD 加 2 测试（全 reject 不重生 + 部分 accept 仍重生），测试 252→254 | — |
 | 2026-05-29 (九) | **Linus 系统性 review 重构第 2-3 项**（2 commits）：① FeedRow/BuiltInFeedRow toggle 改自定义 Binding（set 里 mutate→persist，失败 rollback 自动回弹），删 4 处 isReverting guard + Task 兜底重入舞蹈；② RefreshService 删 2 处 v2 迁移残留（refreshIfNeeded() 无参 fallback + 全局 isSummarizing bool），activeSummaryPipelineCats 改 @Published private(set) 承接通知职责；测试 254 持平 | `0d3fe46` `34b9d7a` |
+| 2026-05-29 (十) | **新闻 tab 内容重构**（grill 7 轮收敛）：新闻源 8→7，聚焦实时/社会/国际去科技去娱乐。删 HN/The Verge/36氪（科技归 AI tab）；BBC 综合换分版块 World（去娱乐/体育）；补社会维度（新华网社会版官方直连 + 澎湃 RSSHub 镜像）。国内 4 / 国际 3 均衡，主官方直连。filterPrompt 仍 nil（源头干净不开 filter）。所有 URL curl 验证；总数 27→26；测试 254 持平（3 处计数断言更新） | — |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -242,7 +243,7 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 - `Services/ServiceProtocols.swift` — `RSSFetching` / `AISummarizing`（per-cat 显式协议无 fallback）/ `PreferencesStoring`
 - `Services/RefreshDecision.swift` — 触发决策纯函数集，时钟参数注入
 - `Services/RSSService.swift` — FeedKit actor；`RawArticle.publishedAt: Date?`（nil 不入库 #17）；UA + Accept header 防 403
-- `Services/BuiltInFeeds.swift` — **v2: 27 内置源**；`syncInto(context:)` strict 同步 + categoryChanged 路径先改 feed 再删 articles（M2）；`deduplicateArticles` 重建容灾
+- `Services/BuiltInFeeds.swift` — **v2: 26 内置源（11 AI + 8 财报 + 7 新闻）**；`syncInto(context:)` strict 同步 + categoryChanged 路径先改 feed 再删 articles（M2）；`deduplicateArticles` 重建容灾
 - `Services/FeedSettingsStore.swift` — 集中处理 feed 启停/删除：`persistBuiltInEnabledChange` / `deleteCustomFeeds`；strict 删 articles + 失败 rollback；调用方负责 UI 状态回滚
 - `Services/UsageRecording.swift` / `UsageRecorder.swift` / `UsageAggregator.swift` / `UsageFormatter.swift` — Token 用量协议/SwiftData 实现/纯函数聚合/格式化
 
@@ -271,9 +272,11 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 
 ## 内置订阅源
 
-v2: 27 个 = 11 AI + 8 财报 + 8 新闻。完整列表见 `Sources/AINewsBar/Services/BuiltInFeeds.swift` 或 `README.md` § 内置订阅源。
+v2: 26 个 = 11 AI + 8 财报 + 7 新闻。完整列表见 `Sources/AINewsBar/Services/BuiltInFeeds.swift` 或 `README.md` § 内置订阅源。
 
-> **中文财报源镜像依赖**：华尔街见闻 / 第一财经 / 东方财富 / 财新等官方 RSS 全部 404 或返 HTML。2026-05-25 通过 RSSHub 公共镜像 `rsshub.rssforever.com` 引入财联社头条 + 华尔街见闻全球；备用镜像 `rss.injahow.cn` 同路径可用。RSSHub 公共实例随时可能被反爬升级或下线 — known risk，可接受。
+> **新闻 tab 定位（2026-05-29）**：聚焦实时/社会/国际，去科技去娱乐。7 源 = NYT World + BBC World + FT 中文新闻 + 新华网时政 + 人民日报时政 + 新华网社会 + 澎湃新闻（国内 4 / 国际 3 均衡）。删旧科技源（HN/The Verge/36氪，科技由 AI tab 覆盖）；BBC 综合 `news/rss.xml` 换分版块 `news/world/rss.xml`（去娱乐/体育）；新增社会民生维度（新华网社会版 `society/news_society.xml` 官方直连 + 澎湃市场化视角）。`CategoryConfig.news.filterPrompt` 仍 nil（源头干净，不开 filter 不烧 token）。
+
+> **中文财报源镜像依赖**：华尔街见闻 / 第一财经 / 东方财富 / 财新等官方 RSS 全部 404 或返 HTML。2026-05-25 通过 RSSHub 公共镜像 `rsshub.rssforever.com` 引入财联社头条 + 华尔街见闻全球；备用镜像 `rss.injahow.cn` 同路径可用。RSSHub 公共实例随时可能被反爬升级或下线 — known risk，可接受。**澎湃新闻（新闻 tab）同走该镜像同款 known risk。**
 
 ---
 

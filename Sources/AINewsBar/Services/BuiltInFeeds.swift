@@ -2,8 +2,8 @@ import Foundation
 import SwiftData
 
 enum BuiltInFeeds {
-    /// 内置源完整清单。v2-multi-category 扩展为 27 源（11 AI + 8 财报 + 8 新闻）。
-    /// URL 已 curl 验证（2026-05-24 / 2026-05-25 财报源增补中文）。
+    /// 内置源完整清单。v2-multi-category：26 源（11 AI + 8 财报 + 7 新闻）。
+    /// URL 已 curl 验证（2026-05-24 / 2026-05-25 财报源增补中文 / 2026-05-29 新闻源聚焦时政社会国际）。
     /// 财报区中文源依赖 RSSHub 公共镜像 rsshub.rssforever.com（官方直连全 404/HTML）；
     /// 备用镜像 rss.injahow.cn 同路径可用，user 可在设置里手动替换 URL。
     static let all: [(category: Category, title: String, url: String)] = [
@@ -31,15 +31,18 @@ enum BuiltInFeeds {
         (.earnings, "FT 中文财经",          "https://www.ftchinese.com/rss/feed"),
         (.earnings, "雪球热门",             "https://xueqiu.com/hots/topic/rss"),
 
-        // MARK: - 新闻 tab (8 = 4 en + 4 zh)
-        (.news, "BBC News",          "https://feeds.bbci.co.uk/news/rss.xml"),
+        // MARK: - 新闻 tab (7 = 时政/社会/国际，去科技去娱乐)
+        // 2026-05-29 重构：聚焦实时/社会/国际新闻。删旧科技源（HN/The Verge/36氪，
+        // 科技交给 AI tab）；BBC 综合换成分版块 World（去娱乐/体育噪声）；
+        // 补社会民生维度（新华社会版官方直连 + 澎湃市场化视角）。国内 4 / 国际 3 均衡。
         (.news, "NYT World",         "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"),
-        (.news, "Hacker News Top",   "https://hnrss.org/frontpage"),
-        (.news, "The Verge",         "https://www.theverge.com/rss/index.xml"),
-        (.news, "36 氪",              "https://36kr.com/feed"),
-        (.news, "新华网",              "https://www.xinhuanet.com/politics/news_politics.xml"),
-        (.news, "人民日报",            "https://www.people.com.cn/rss/politics.xml"),
+        (.news, "BBC World",         "https://feeds.bbci.co.uk/news/world/rss.xml"),
         (.news, "FT 中文新闻",         "https://www.ftchinese.com/rss/news"),
+        (.news, "新华网 时政",         "https://www.xinhuanet.com/politics/news_politics.xml"),
+        (.news, "人民日报 时政",       "https://www.people.com.cn/rss/politics.xml"),
+        (.news, "新华网 社会",         "https://www.xinhuanet.com/society/news_society.xml"),
+        // 澎湃走 RSSHub 公共镜像（同财报 tab known-risk；备用 rss.injahow.cn 同路径）
+        (.news, "澎湃新闻",            "https://rsshub.rssforever.com/thepaper/featured"),
     ]
 
     static func makeFeeds() -> [Feed] {

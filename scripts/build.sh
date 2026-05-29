@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2.0.4"
-BUILD_NUMBER="5"                 # CFBundleVersion 单调递增，每次发版 +1
+VERSION="2.0.5"
+BUILD_NUMBER="6"                 # CFBundleVersion 单调递增，每次发版 +1
 APP_NAME="AINewsBar"             # binary 文件名 / Bundle 路径（与 Package.swift target 一致，不改）
 DISPLAY_NAME="资讯助手"            # 用户可见名（CFBundleName + CFBundleDisplayName 共用）
 BUNDLE_ID="com.ainewsbar.app"    # Bundle ID 保留 — 改了 UserDefaults domain 会变导致 API Key 丢失

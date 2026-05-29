@@ -7,8 +7,6 @@ struct FeedRowView: View {
     @EnvironmentObject private var refreshService: RefreshService
     @State private var saveErrorMessage = ""
     @State private var showSaveErrorAlert = false
-    /// 第十七轮 P3：skipFilter 回滚重入 guard，与 isEnabled 同级处理。
-    @State private var isRevertingSkipFilter = false
     let checkStatus: CheckStatus
     let onCheck: () async -> Void
 
@@ -61,43 +59,35 @@ struct FeedRowView: View {
             Text("跳过筛选")
                 .font(Typography.caption)
                 .foregroundStyle(TextColor.tertiary)
-            Toggle("", isOn: $feed.skipFilter)
+            // 自定义 Binding 替代 $feed.skipFilter 双向绑定：set 里做可失败的持久化，
+            // 成功才落库；失败 rollback（连带撤销 feed.skipFilter 的 pending 改动）后
+            // SwiftUI 重渲染让 get 读回旧值，Toggle 自动回弹。无回写、无 onChange 重入，
+            // 故不再需要 isReverting guard + Task 兜底那套舞蹈。
+            Toggle("", isOn: Binding(
+                get: { feed.skipFilter },
+                set: { saveSkipFilterChange(newValue: $0) }
+            ))
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)
-                .onChange(of: feed.skipFilter) { oldValue, newValue in
-                    if isRevertingSkipFilter {
-                        isRevertingSkipFilter = false
-                        return
-                    }
-                    saveSkipFilterChange(newValue: newValue, revertingTo: oldValue)
-                }
         }
         .help("跳过 AI 筛选（纯净源用，省 token；如 Apple Newsroom 100% 都是公司动态可开启）")
     }
 
-    private func saveSkipFilterChange(newValue: Bool, revertingTo oldValue: Bool) {
+    private func saveSkipFilterChange(newValue: Bool) {
+        feed.skipFilter = newValue   // 进 context pending；persist 内部 save 一并落盘
         do {
             let updated = try FeedSettingsStore.persistSkipFilterChange(
                 feed: feed, newValue: newValue, in: modelContext
             )
-            // 第九轮 P2 / 第十三轮 P3 / 第十四轮 P3：行为收敛到
-            // `refreshService.handleSkipFilterPendingFlipped(for:context:)`，
-            // 见该 helper 注释。两个 FeedRow 共享避免 copy-paste 漏一半。
+            // 行为收敛到 refreshService.handleSkipFilterPendingFlipped（postUnreadCount +
+            // invalidatePerCatCache + fire-and-forget refresh），两个 FeedRow 共享。
             if newValue && updated > 0 {
                 let cat = AINewsBar.Category.from(rawValue: feed.category)
                 refreshService.handleSkipFilterPendingFlipped(for: cat, context: modelContext)
             }
         } catch {
-            // 第十七轮 P3：确定性 guard 时序，与 isEnabled 的 handleToggle 同处理。
-            // 先 arm guard 再回写 oldValue（回写触发 onChange 重入，由 guard 吃掉），
-            // Task 下一轮兜底 reset 防"回写未触发 onChange → guard 卡 true 吃掉下次真实 toggle"。
-            isRevertingSkipFilter = true
-            modelContext.rollback()
-            feed.skipFilter = oldValue
-            Task { @MainActor in
-                isRevertingSkipFilter = false
-            }
+            modelContext.rollback()   // 撤销 feed.skipFilter + 任何 article.accepted 改动 → Toggle 回弹
             saveErrorMessage = error.localizedDescription
             showSaveErrorAlert = true
         }
@@ -110,9 +100,6 @@ struct BuiltInFeedRowView: View {
     @EnvironmentObject private var refreshService: RefreshService
     @State private var saveErrorMessage = ""
     @State private var showSaveErrorAlert = false
-    @State private var isRevertingEnabledChange = false
-    /// 第十七轮 P3：skipFilter 回滚重入 guard，与 isEnabled 的 isRevertingEnabledChange 同级。
-    @State private var isRevertingSkipFilter = false
     let checkStatus: CheckStatus
     let onCheck: () async -> Void
 
@@ -138,17 +125,14 @@ struct BuiltInFeedRowView: View {
             }
             CheckStatusIcon(status: checkStatus)
             checkButton
-            Toggle("", isOn: $feed.isEnabled)
+            // 自定义 Binding（同 skipFilterToggle 思路）：成功才落 UI 状态，失败 rollback 回弹。
+            Toggle("", isOn: Binding(
+                get: { feed.isEnabled },
+                set: { handleToggle(enabled: $0) }
+            ))
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.small)
-                .onChange(of: feed.isEnabled) { oldValue, enabled in
-                    if isRevertingEnabledChange {
-                        isRevertingEnabledChange = false
-                        return
-                    }
-                    handleToggle(enabled: enabled, revertingTo: oldValue)
-                }
         }
         .padding(.vertical, 2)
         .alert("保存失败", isPresented: $showSaveErrorAlert) {
@@ -173,57 +157,43 @@ struct BuiltInFeedRowView: View {
             Text("跳过筛选")
                 .font(Typography.caption)
                 .foregroundStyle(TextColor.tertiary)
-            Toggle("", isOn: $feed.skipFilter)
+            Toggle("", isOn: Binding(
+                get: { feed.skipFilter },
+                set: { saveSkipFilterChange(newValue: $0) }
+            ))
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)
-                .onChange(of: feed.skipFilter) { oldValue, newValue in
-                    if isRevertingSkipFilter {
-                        isRevertingSkipFilter = false
-                        return
-                    }
-                    saveSkipFilterChange(newValue: newValue, revertingTo: oldValue)
-                }
         }
         .help("跳过 AI 筛选（纯净源用，省 token；如 Apple Newsroom 100% 都是公司动态可开启）")
     }
 
-    private func saveSkipFilterChange(newValue: Bool, revertingTo oldValue: Bool) {
+    private func saveSkipFilterChange(newValue: Bool) {
+        feed.skipFilter = newValue
         do {
             let updated = try FeedSettingsStore.persistSkipFilterChange(
                 feed: feed, newValue: newValue, in: modelContext
             )
-            // 第九轮 P2 / 第十四轮 P3：同 FeedRowView 走共享 helper。
-            // 第十四轮前内置源路径漏了立即 refresh —— 文章可见但 AI 派生空着等 timer。
             if newValue && updated > 0 {
                 let cat = AINewsBar.Category.from(rawValue: feed.category)
                 refreshService.handleSkipFilterPendingFlipped(for: cat, context: modelContext)
             }
         } catch {
-            // 第十七轮 P3：确定性 guard 时序，与 isEnabled 的 handleToggle 同处理。
-            // 先 arm guard 再回写 oldValue（回写触发 onChange 重入，由 guard 吃掉），
-            // Task 下一轮兜底 reset 防"回写未触发 onChange → guard 卡 true 吃掉下次真实 toggle"。
-            isRevertingSkipFilter = true
             modelContext.rollback()
-            feed.skipFilter = oldValue
-            Task { @MainActor in
-                isRevertingSkipFilter = false
-            }
             saveErrorMessage = error.localizedDescription
             showSaveErrorAlert = true
         }
     }
 
-    private func handleToggle(enabled: Bool, revertingTo oldValue: Bool) {
+    private func handleToggle(enabled: Bool) {
+        feed.isEnabled = enabled   // 进 context pending；persist 内部 save 一并落盘
         do {
             try FeedSettingsStore.persistBuiltInEnabledChange(feed: feed, enabled: enabled, in: modelContext)
-            // 禁用源会删除该源所有文章，启用则下面会触发 refresh 抓回。
-            // 两种路径都改变了 "isRead==false && accepted==true" 集合，必须同步
-            // menu bar badge —— 主列表 @Query 会自动更新，但 badge 只靠
-            // Notification (AppDelegate 监听)。不主动 post 就 stale。
+            // 禁用源会删该源所有文章，启用则下面触发 refresh 抓回。两种路径都改变了
+            // "isRead==false && accepted==true" 集合，必须同步 menu bar badge（主列表 @Query
+            // 自动更新，但 badge 只靠 Notification）。再清该 cat 推荐/日报派生缓存：digest 文本
+            // 可能含已删源内容；推荐 IDs 可能指向已删文章；非空会让 auto refresh 不重生。
             refreshService.postUnreadCount(context: modelContext)
-            // 第八轮 P2：清该 cat 推荐/日报派生缓存。digest 文本可能含已删源内容；
-            // 推荐 IDs 可能指向已删文章；且非空会让 auto refresh 不重生（陈旧永留）
             let cat = AINewsBar.Category.from(rawValue: feed.category)
             refreshService.invalidatePerCatCache(for: cat)
             if enabled {
@@ -231,18 +201,7 @@ struct BuiltInFeedRowView: View {
                 Task { await service.refresh(cat) }
             }
         } catch {
-            // P2-B: 确定性 guard 时序。
-            // 1) 先 arm guard，再触发任何可能让 onChange 重入的操作（rollback 与
-            //    feed.isEnabled = oldValue 都可能触发 SwiftData @Bindable 的变更通知）
-            // 2) 同步路径里期望 onChange 触发恰好一次，guard handler 把它吃掉并 reset
-            // 3) 兜底：用 Task 在下一个 RunLoop turn 强制 reset，避免"没触发 onChange
-            //    → guard 永久卡 true → 吃掉用户下次真实 toggle"
-            isRevertingEnabledChange = true
-            modelContext.rollback()
-            feed.isEnabled = oldValue
-            Task { @MainActor in
-                isRevertingEnabledChange = false
-            }
+            modelContext.rollback()   // 撤销 feed.isEnabled + 已删 article → Toggle 回弹
             saveErrorMessage = error.localizedDescription
             showSaveErrorAlert = true
         }

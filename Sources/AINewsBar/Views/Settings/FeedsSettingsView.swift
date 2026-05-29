@@ -30,12 +30,20 @@ struct FeedsSettingsView: View {
     private var summaryText: String? {
         guard !checkResults.isEmpty else { return nil }
         if isCheckingAll { return "检测中…" }
-        let completed = checkResults.values.filter {
-            switch $0 {
-            case .idle, .checking: return false
-            default: return true
+        // 第十八轮 P3：只统计当前列表仍存在的 feed 结果。checkResults 是 [UUID: …] 字典，
+        // 同 cat 内删源 / 加源 / 检测中列表变化都会残留孤儿 id；切 cat 虽清空但其他
+        // mutation 路径不会。以 filteredFeeds 的 id 集合做交集是单点防御，无需在每条
+        // 删除 / 添加路径散布清理逻辑，也免去检测进行中的竞态。
+        let visibleIDs = Set(filteredFeeds.map(\.id))
+        let completed = checkResults
+            .filter { visibleIDs.contains($0.key) }
+            .values
+            .filter {
+                switch $0 {
+                case .idle, .checking: return false
+                default: return true
+                }
             }
-        }
         guard !completed.isEmpty else { return nil }
         let ok = completed.filter { if case .success = $0 { return true }; return false }.count
         return "\(ok)/\(completed.count) 个源正常"

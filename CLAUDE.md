@@ -42,7 +42,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-28 | 第十五轮 review 3 项：MenuBarView.onAppear 无条件 refreshIfNeeded 防跨日 stale / build.sh bump 2.0.2→2.0.3 / 修 BuiltInFeedsTests 假阳性 case；测试 250 持平（强化断言） | `6150107` |
 | 2026-05-29 | 第十六轮 review 3 项：refresh() 加 startupError 守护（UI 路径绕过 AppDelegate 保护）/ FeedsSettingsView 切 cat 清 checkResults / GeneralSettingsView toggle guard 兜底 reset；测试 250 → 252 | `0d3a3e7` |
 | 2026-05-29 (二) | 第十七轮 review 3 项：AddFeedSheet 捕获 FeedDraft 原子保存（验证后改 UI 不影响保存）/ FeedsSettingsView checkRunID 挡 in-flight 跨 cat 回写 / FeedRowView+BuiltInFeedRow skipFilter 重入 guard（与 isEnabled 同级）；测试 252 持平（纯 view 层） | `0d3a3e7` |
-| 2026-05-29 (三) | 第十八轮 review 1 项：FeedsSettingsView checkRunID → categoryGeneration（仅切 cat 递增，检测只捕获不递增）；修第十七轮引入的"同 cat 并发单检互相作废 / checkAll 中点单检丢弃批量结果"回归；测试持平（纯 view 层） | — |
+| 2026-05-29 (三) | 第十八轮 review 1 项：FeedsSettingsView checkRunID → categoryGeneration（仅切 cat 递增，检测只捕获不递增）；修第十七轮引入的"同 cat 并发单检互相作废 / checkAll 中点单检丢弃批量结果"回归；测试持平（纯 view 层） | `7c05018` |
+| 2026-05-29 (四) | 第十八轮 review 第 2 项：FeedsSettingsView.summaryText 以 filteredFeeds id 集合做交集，只统计当前可见 feed 结果；治"同 cat 内删源/加源/检测中列表变化残留孤儿 id 被汇总继续统计"；测试持平（纯 view 层） | — |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -181,6 +182,7 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | FeedsSettingsView checkRunID 挡 in-flight（第十七轮 P3）| 新增 `checkRunID`；checkFeed/checkAll 开始递增并捕获，await/group 回写前 `guard runID == checkRunID`；切 cat onChange 也 bump（+ 置 isCheckingAll=false）使旧 run 失效 | 第十六轮切 cat 清 checkResults 只挡静态串显示，挡不住 checkAll() 已启动的 task group 继续把旧分类结果回写污染新 tab。token 比对让"不是当前检测"的回写丢弃；checkAll 完成复位 isCheckingAll 也加 guard 避免覆盖切 cat 后的状态 |
 | skipFilter 回滚重入 guard（第十七轮 P3）| FeedRowView + BuiltInFeedRowView 各加 `isRevertingSkipFilter`；onChange 先判 guard 吃掉重入，catch 照抄 isEnabled 时序：arm guard → rollback + 回写 oldValue → Task 下一轮兜底 reset | 旧 skipFilter catch 直接 rollback + `feed.skipFilter = oldValue`，回写再触发 onChange → 重复 saveSkipFilterChange / 重复 alert。同文件 isEnabled 路径（handleToggle / Toggle onChange）早已做此 guard，skipFilter 漏了同级处理 |
 | checkRunID → categoryGeneration（第十八轮）| 计数器语义改为"分类代际"，**仅** onChange(selectedCategory) 递增；checkFeed/checkAll **只捕获不递增**，回写前 `guard generation == categoryGeneration` | 第十七轮用"每次操作递增"的全局 token 表达"同 cat 并发检测互不干扰"是错的——检测结果本就按 feed.id 落 checkResults 天然独立。旧实现引入两个回归：(1) 快速点两个不同源检测，后者 bump 让前者结果被丢弃永停"检测中"；(2) checkAll 运行中点单检 bump 让批量剩余结果回写时被丢弃。只有切 cat 才需整体失效，单 cat 内并发检测无需互相作废 |
+| summaryText 交集当前可见 feed（第十八轮）| `summaryText` 先 `Set(filteredFeeds.map(\.id))`，只统计 checkResults 中仍可见的 id | checkResults 是 [UUID: CheckStatus] 字典，切 cat 会清空但同 cat 内删源/加源/检测中列表变化会残留孤儿 id → 底部"x/y 个源正常"把已删源继续算进去。以可见 id 做交集是单点防御，胜过在每条删除/添加 mutation 路径散布清理（DRY + 免检测竞态）|
 
 ---
 

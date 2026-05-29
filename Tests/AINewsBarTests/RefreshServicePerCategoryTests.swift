@@ -102,7 +102,7 @@ final class RefreshServicePerCategoryTests: XCTestCase {
         XCTAssertEqual(earningsArticles.count, 0, "仅 refresh AI 不应抓 earnings")
     }
 
-    func testGlobalSummarizingFlagStaysTrueUntilAllConcurrentCatsFinish() async {
+    func testConcurrentCatsSummarizingFlagsAreIsolated() async {
         prefs.apiKey = "test-key"
         let aiFeed = seedFeed("https://ai.com/feed", title: "AI Feed", category: .ai)
         let newsFeed = seedFeed("https://news.com/feed", title: "News Feed", category: .news)
@@ -116,18 +116,21 @@ final class RefreshServicePerCategoryTests: XCTestCase {
         async let aiRefresh: Void = service.refresh(.ai)
         async let newsRefresh: Void = service.refresh(.news)
 
+        // 中点：AI cat 摘要已结束、news cat 仍在跑。per-cat flag 必须隔离 ——
+        // 一个 tab 结束不能影响另一个 tab 的"生成中"状态。
         try? await _Concurrency.Task.sleep(nanoseconds: 90_000_000)
-        XCTAssertTrue(service.isSummarizing,
-                      "AI cat 结束但 news cat 仍在摘要时，全局 summarizing flag 不能提前变 false")
         XCTAssertFalse(service.isSummarizing(category: .ai),
                        "AI cat 摘要结束后，不应继续禁用 AI tab 操作")
         XCTAssertTrue(service.isSummarizing(category: .news),
                       "News cat 仍在摘要时，只应标记 news tab 生成中")
+        XCTAssertEqual(service.activeSummaryPipelineCats, [.news],
+                       "活跃摘要集合应只剩仍在跑的 news cat")
 
         _ = await (aiRefresh, newsRefresh)
-        XCTAssertFalse(service.isSummarizing)
         XCTAssertFalse(service.isSummarizing(category: .ai))
         XCTAssertFalse(service.isSummarizing(category: .news))
+        XCTAssertTrue(service.activeSummaryPipelineCats.isEmpty,
+                      "全部结束后活跃摘要集合应清空")
     }
 
     func testSystemWakeRefreshesAllEnabledCats() async {

@@ -50,9 +50,6 @@ final class RefreshService: ObservableObject {
     @Published private(set) var states: [AINewsBar.Category: CategoryState] =
         Dictionary(uniqueKeysWithValues: AINewsBar.Category.allCases.map { ($0, CategoryState()) })
 
-    /// 全局兼容 flag。新代码优先 `isSummarizing(category:)`，避免一个 tab 的处理禁用所有 tab。
-    @Published var isSummarizing = false
-
     /// 全局 AI 错误（影响所有 cat，UI 顶部 sticky banner）。
     @Published var globalAIError: GlobalAIError?
 
@@ -134,8 +131,12 @@ final class RefreshService: ObservableObject {
     /// cross-cat 可并发。
     private var refreshTasks: [AINewsBar.Category: Task<Void, Never>] = [:]
 
-    /// 正在跑摘要 pipeline 的 cat 集合。全局 isSummarizing 从集合派生。
-    private var activeSummaryPipelineCats: Set<AINewsBar.Category> = []
+    /// 正在跑摘要 pipeline 的 cat 集合。`isSummarizing(category:)` 从中派生。
+    /// @Published：集合变化即触发 objectWillChange，驱动读 `isSummarizing(category:)`
+    /// 的 view（HeaderView / RecommendSectionView / DigestSectionView）重渲染。
+    /// 旧实现靠一个冗余全局 `isSummarizing` Bool 承担此通知，但没有 view 读它，且会
+    /// 误导成"可用全局 flag"（一个 tab 处理就禁用所有 tab）；删掉后由集合本身发通知。
+    @Published private(set) var activeSummaryPipelineCats: Set<AINewsBar.Category> = []
 
     // MARK: - Init
 
@@ -170,7 +171,6 @@ final class RefreshService: ObservableObject {
         for (_, task) in refreshTasks { task.cancel() }
         refreshTasks.removeAll()
         activeSummaryPipelineCats.removeAll()
-        isSummarizing = false
         configured = false
     }
 
@@ -274,11 +274,6 @@ final class RefreshService: ObservableObject {
         if Date().timeIntervalSince(last) > staleThreshold {
             await refresh(cat)
         }
-    }
-
-    /// 旧无 cat 签名 fallback to .ai。
-    func refreshIfNeeded() async {
-        await refreshIfNeeded(.ai)
     }
 
     /// 全局未读计数（三 cat 累加，仅算 accepted=true）。menu bar 图标 badge 显示此值。
@@ -907,12 +902,10 @@ final class RefreshService: ObservableObject {
 
     private func beginSummaryPipeline(_ cat: AINewsBar.Category) {
         activeSummaryPipelineCats.insert(cat)
-        isSummarizing = !activeSummaryPipelineCats.isEmpty
     }
 
     private func endSummaryPipeline(_ cat: AINewsBar.Category) {
         activeSummaryPipelineCats.remove(cat)
-        isSummarizing = !activeSummaryPipelineCats.isEmpty
     }
 
     /// 跨日全 cat 重置：lastResetCheckDate 不在今天时执行。幂等。

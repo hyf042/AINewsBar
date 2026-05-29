@@ -453,7 +453,7 @@ final class RefreshServiceTests: XCTestCase {
         service.lastResetCheckDate = yesterday
         prefs.saveDigest(content: "昨天的摘要", date: yesterday, for: .ai)
 
-        await service.refreshIfNeeded()
+        await service.refreshIfNeeded(.ai)
 
         // refreshIfNeeded → resetCrossedDayStateIfNeeded → 立即清空 dailyDigest
         // 紧随 refresh() 触发；本测试关注的是 "打开瞬间 UI 已切到空" 这步

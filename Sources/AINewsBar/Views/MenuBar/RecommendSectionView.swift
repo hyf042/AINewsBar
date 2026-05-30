@@ -6,6 +6,9 @@ struct RecommendSectionView: View {
     /// 来自父视图的 @Query 投影（已过滤当前 cat）；用于在内存中按 id 查找推荐文章（避免重复 fetch）
     let articles: [Article]
     let onOpen: (Article) -> Void
+    /// 父级共享的"主视野互斥状态"。点 header 在 .recommend ↔ .article 之间 toggle。
+    /// 折叠态（.article）下仅渲染 header，下方推荐项隐藏。
+    @Binding var expandedSection: ExpandedSection
     @EnvironmentObject private var refreshService: RefreshService
 
     private var perCatState: CategoryState { refreshService.state(for: category) }
@@ -44,19 +47,22 @@ struct RecommendSectionView: View {
     var body: some View {
         let loading = picks.isEmpty
         let candidateShort = summarizedCount < recommendThreshold
+        let isExpanded = expandedSection == .recommend
         VStack(alignment: .leading, spacing: 0) {
-            header(loading: loading)
-            if loading {
-                if candidateShort {
-                    candidateShortFootnote
+            header(loading: loading, isExpanded: isExpanded)
+            if isExpanded {
+                if loading {
+                    if candidateShort {
+                        candidateShortFootnote
+                    } else {
+                        placeholderRows
+                    }
                 } else {
-                    placeholderRows
+                    pickRows
                 }
-            } else {
-                pickRows
             }
         }
-        .padding(.bottom, 4)
+        .padding(.bottom, isExpanded ? 4 : 0)
         .background(BrandColor.surfaceMuted)
     }
 
@@ -72,7 +78,9 @@ struct RecommendSectionView: View {
         .padding(.vertical, 12)
     }
 
-    private func header(loading: Bool) -> some View {
+    /// header 折叠/展开形态完全一致，加 chevron 表示当前状态。
+    /// 整 header 可点切换 expandedSection；嵌入的 Button (刷新) 事件不冒泡，单独可点。
+    private func header(loading: Bool, isExpanded: Bool) -> some View {
         HStack(spacing: 4) {
             Image(systemName: "star.fill")
                 .font(Typography.titleEmphasized)
@@ -104,10 +112,20 @@ struct RecommendSectionView: View {
                 .disabled(perCatState.isRegeneratingRecommend || isCurrentCatSummarizing)
                 .help("重新生成推荐")
             }
+            // chevron 表示当前展开/折叠状态，对齐 ArticleListSection 风格
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(Typography.caption)
+                .foregroundStyle(TextColor.tertiary)
         }
         .padding(.horizontal, 12)
         .padding(.top, 8)
-        .padding(.bottom, 4)
+        .padding(.bottom, isExpanded ? 4 : 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                expandedSection = (expandedSection == .recommend) ? .article : .recommend
+            }
+        }
     }
 
     private var placeholderRows: some View {

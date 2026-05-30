@@ -9,9 +9,11 @@ struct ArticleListSection: View {
     let unreadArticles: [Article]
     let readArticles: [Article]
     let onOpen: (Article) -> Void
+    /// 父级共享的"主视野互斥状态"。点 header 在 .recommend ↔ .article 之间 toggle。
+    /// 折叠态（.recommend）下仅渲染 foldedHeader，文章列表隐藏。
+    @Binding var expandedSection: ExpandedSection
 
     @EnvironmentObject private var refreshService: RefreshService
-    @State private var isExpanded = false
 
     private var perCatState: CategoryState { refreshService.state(for: category) }
     private var totalCount: Int { unreadArticles.count + readArticles.count }
@@ -24,13 +26,14 @@ struct ArticleListSection: View {
         }
     }
 
-    /// 单行高度估算 80pt：兼顾长标题 2 行 + 摘要 1 行 + padding（v2 修复，旧 52pt 会让长标题被截）。
-    /// max 400pt：上限平衡 — 新闻 84 篇等大量文章避免 popover 总高度溢出 16 寸 MBP 屏幕；
-    /// 文章超量时 List 内 scroll 而非 popover 撑高。AI 少文章 (≤4) 不触 max 自然贴合。
+    /// 单行高度估算 95pt：摘要从 1 行升 2 行后实际单 row ~93pt（标题 2 行 + 摘要 2 行 + padding）。
+    /// max 480pt：上限上调 — 互斥折叠落地后 article 展开时 recommend 自动折，
+    /// 推荐区让出 ~400pt 给 article，配合 MenuBarView .frame(maxHeight: 1000) 兜底，
+    /// article 展开后可见 ~5 行文章。文章超量时 List 内 scroll 而非 popover 撑高。
     private var listHeight: CGFloat {
-        let rowHeight: CGFloat = 80
+        let rowHeight: CGFloat = 95
         let separatorHeight: CGFloat = readArticles.isEmpty ? 0 : 28
-        return min(max(CGFloat(totalCount) * rowHeight + separatorHeight, 120), 400)
+        return min(max(CGFloat(totalCount) * rowHeight + separatorHeight, 120), 480)
     }
 
     /// 5 状态副文案（风格 A：" · " 分隔）
@@ -51,8 +54,9 @@ struct ArticleListSection: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            foldedHeader
+        let isExpanded = expandedSection == .article
+        return VStack(spacing: 0) {
+            foldedHeader(isExpanded: isExpanded)
             if isExpanded {
                 Divider()
                 articleListContent
@@ -60,7 +64,10 @@ struct ArticleListSection: View {
         }
     }
 
-    private var foldedHeader: some View {
+    /// foldedHeader toggle 在 .recommend ↔ .article 之间。
+    /// 单字段互斥模型：点 article header = 切到 .article（recommend 自动折）/
+    /// 已展开时点 = 切回 .recommend（recommend 自动展开）。
+    private func foldedHeader(isExpanded: Bool) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "list.bullet")
                 .font(Typography.titleEmphasized)
@@ -83,7 +90,7 @@ struct ArticleListSection: View {
         .contentShape(Rectangle())
         .onTapGesture {
             withAnimation(.easeInOut(duration: 0.25)) {
-                isExpanded.toggle()
+                expandedSection = (expandedSection == .article) ? .recommend : .article
             }
         }
     }

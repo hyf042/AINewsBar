@@ -12,6 +12,11 @@ struct MenuBarView: View {
     /// 当前选中 tab。启动从 prefs 恢复；切换时 onChange 持久化。
     @State private var selectedTab: AINewsBar.Category = .ai
 
+    /// 主视野互斥状态。默认 .recommend（推荐区为主视野）。
+    /// reset 触发：cat 切换（onChange）+ popover 关闭重开（@State 自动重建）。
+    /// 不记忆到 prefs：用户原话"不记忆，每次切换tab都重置"。
+    @State private var expandedSection: ExpandedSection = .recommend
+
     // MARK: - per-cat @Query (3 cat × 1 个；用单条件避免 type-check 超时)
     //
     // @Query 谓词 3 条件 (isRead && category && accepted) 用 && 链编译器 type-check 超时，
@@ -68,17 +73,23 @@ struct MenuBarView: View {
             Divider()
             RecommendSectionView(category: selectedTab,
                                  articles: currentUnread + currentRead,
-                                 onOpen: openArticle)
+                                 onOpen: openArticle,
+                                 expandedSection: $expandedSection)
             Divider()
             ArticleListSection(category: selectedTab,
                                unreadArticles: currentUnread,
                                readArticles: currentRead,
-                               onOpen: openArticle)
-                .id(selectedTab)  // cat 切换时重建，重置 @State isExpanded（默认折叠）
+                               onOpen: openArticle,
+                               expandedSection: $expandedSection)
+            // 不再 .id(selectedTab) — 折叠状态外部受控，cat 切换由 onChange 显式 reset expandedSection
             Divider()
             FooterView(category: selectedTab)
         }
         .frame(width: 380)
+        // popover 总高 maxHeight 兜底：避免在外接小屏 / 低分辨率 scaled 下溢出屏幕。
+        // 16 寸 MBP 默认 scaled 可见高度 ~1080pt，留 80pt 余量给菜单栏/屏幕底。
+        // 内部 ArticleListSection listHeight 已收紧到 260pt，与本 maxHeight 协同保证不溢出。
+        .frame(maxHeight: 1000, alignment: .top)
         .onAppear {
             // 启动恢复上次选中 tab；同时尝试触发该 cat lazy refresh（财报/新闻首次切入）
             let saved = PreferencesService.shared.loadSelectedTab()
@@ -92,6 +103,10 @@ struct MenuBarView: View {
         }
         .onChange(of: selectedTab) { _, newValue in
             PreferencesService.shared.saveSelectedTab(newValue)
+            // 切 tab reset expandedSection 到默认 .recommend（产品立场：推荐为主视野，不记忆）
+            withAnimation(.easeInOut(duration: 0.25)) {
+                expandedSection = .recommend
+            }
             // 切到从未刷新过的 cat 时 lazy load (首启 AI-only + 用户首次切 tab 路径)
             if refreshService.state(for: newValue).lastRefreshDate == nil {
                 Task { await refreshService.refreshIfNeeded(newValue) }

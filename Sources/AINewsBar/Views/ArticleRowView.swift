@@ -4,8 +4,6 @@ struct ArticleRowView: View {
     let article: Article
     let onTap: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             // 未读 dot —— 4pt 实心圆点 + brand orange + 顶部对齐首行
@@ -34,12 +32,17 @@ struct ArticleRowView: View {
                     .multilineTextAlignment(.leading)
 
                 if let summary = article.aiSummary {
+                    // summary 永久 2 行（与 RecommendItemView 一致；删 hover 切换）。
+                    // 同款崩溃路径：hover 改 lineLimit → row 高度变化 → popover 重算 → 崩。
+                    // ArticleRow 虽在 List 内 List 会吸收 size 变化不直接崩，
+                    // 但永久 2 行同时改善可见性，保持两个 row 设计一致。
+                    // fixedSize(vertical: true) 必需：保证 Text 按多行 ideal size 渲染。
                     Text(summary)
                         .font(Typography.caption)
                         .foregroundStyle(TextColor.secondary)
-                        .lineLimit(isHovered ? nil : 1)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.leading)
-                        .animation(.easeInOut(duration: 0.15), value: isHovered)
                 }
             }
         }
@@ -48,10 +51,5 @@ struct ArticleRowView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isHovered = hovering
-            }
-        }
     }
 }

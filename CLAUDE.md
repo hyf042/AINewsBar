@@ -50,6 +50,8 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-29 (八) | 第二十轮 review P2：hasNewArticles 语义修复（"可见新文章" vs "RSS 入库数"）；runFilterStage 返回 newlyAccepted，财报 cat 本轮新抓全被 filter reject 时不再白烧 recommend/digest token；TDD 加 2 测试（全 reject 不重生 + 部分 accept 仍重生），测试 252→254 | — |
 | 2026-05-29 (九) | **Linus 系统性 review 重构第 2-3 项**（2 commits）：① FeedRow/BuiltInFeedRow toggle 改自定义 Binding（set 里 mutate→persist，失败 rollback 自动回弹），删 4 处 isReverting guard + Task 兜底重入舞蹈；② RefreshService 删 2 处 v2 迁移残留（refreshIfNeeded() 无参 fallback + 全局 isSummarizing bool），activeSummaryPipelineCats 改 @Published private(set) 承接通知职责；测试 254 持平 | `0d3fe46` `34b9d7a` |
 | 2026-05-29 (十) | **新闻 tab 内容重构**（grill 7 轮收敛）：新闻源 8→7，聚焦实时/社会/国际去科技去娱乐。删 HN/The Verge/36氪（科技归 AI tab）；BBC 综合换分版块 World（去娱乐/体育）；补社会维度（新华网社会版官方直连 + 澎湃 RSSHub 镜像）。国内 4 / 国际 3 均衡，主官方直连。filterPrompt 仍 nil（源头干净不开 filter）。所有 URL curl 验证；总数 27→26；测试 254 持平（3 处计数断言更新） | — |
+| 2026-05-30 | **hover 崩溃根治 + 推荐 ↔ 文章互斥折叠 + 摘要 2 行常显**（grill 4 轮收敛）：① hover 切 lineLimit 让 row 内在尺寸变化触发 MenuBarExtra(.window) popover NSWindow 重算 → `_postWindowNeedsUpdateConstraints` 抛 NSException 必崩（踩坑 #41）。删 hover 状态，summary 永久 `lineLimit(2) + fixedSize(vertical:true)`。② RecommendItem 色条改 row overlay（替代 HStack child）— summary fixedSize 后 HStack layout 协商把色条 `frame(maxHeight: .infinity)` 当上限不强制撑满 → row 间 padding 区透明视觉不连续。overlay 自动 fill receiver 完整 frame 含 padding 区。③ 新增 `ExpandedSection` enum 单字段共享状态 .recommend/.article，两 section 受控 @Binding，cat 切换 onChange 显式 reset，popover 重开 @State 自然 reset。④ 空间预算：ArticleList rowHeight 80→95（适配摘要 2 行）、listHeight 上限 260→480（互斥折叠让 recommend 折叠时让出 ~400pt 给 article 可见 ~5 行）、MenuBarView `.frame(maxHeight: 1000, alignment: .top)` 兜底防外接小屏溢出；测试 254 持平 | `5f4c9c7` |
+| 2026-05-30 (二) | **v2.0.6 发布**：本会话累计改动打包 release（hover 崩溃修复 + 互斥折叠 + 摘要 2 行常显） | `v2.0.6` |
 
 具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
 
@@ -193,6 +195,11 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 保存按钮门控对齐检测（第十九轮 P3-1）| APISettingsView 保存按钮 disabled 由 `trimmedAPIKey.isEmpty` 改为 `trimmedAPIKey.isEmpty \|\| effectiveModel.isEmpty \|\| isChecking`，与"检测可用性"按钮一致 | 旧条件只判 key，但 `saveAndCheck()` 内 `guard !model.isEmpty` 还要求 model 非空 → 自定义模型为空时按钮可点却静默 return；检测中（.checking）未禁用 → 再点并发触发第二次 testConnection。UI 门控必须与业务 guard 同契约 |
 | 异步校验 request identity（第十九轮 P3-2）| AddFeedSheet（`validationGeneration`，仅 URL onChange 递增）+ APISettingsView（`checkGeneration`，4 处输入 onChange 经 `invalidateCheck()` 递增）；请求起始捕获 generation，await 返回后 `guard generation == 当前` 否则丢弃 | 第十七/十二轮已把 draft/key+model 原子捕获，但**回写时**无请求身份：用户在 RSS/testConnection 请求期间改输入（onChange 重置状态让按钮重新可点），旧请求返回仍会回写 UI、`addFeed(旧 draft)`、把旧 key/model 写进 prefs 并显示成功。同第十八轮 categoryGeneration 模式扩展到异步校验。关键：令牌递增处已复位状态为 `.idle`，过期 `return` 不回写不会让 UI 卡"检测中"。AddFeedSheet 仅 URL 失效——title/category 中途变更属第十七轮原子草稿"提交点击瞬间所选"既定语义 |
 | hasNewArticles 语义=可见新文章（第二十轮 P2）| `runFilterStage` 返回类型 `Bool` → `FilterStageOutcome{persisted, newlyAccepted}`；`runRefresh` 用 `newVisibleAtInsert`（入库即 accepted=true 数）`+ newlyAccepted`（filter 本轮判 true 数）`> 0` 取代 `!newArticles.isEmpty` 喂给 processAI | 旧实现把"RSS 入库数"当 hasNewArticles：财报这类有 filter 的 cat，本轮新抓文章全被 reject 时无任何用户可见新内容，却仍因 hasNewArticles=true 在 `shouldRegenerateRecommend` 首行强制重生推荐 + 时间窗满足时重生 digest，后台白烧 token。无 filter cat（AI/news）新文章 insert 即 accepted=true，`newVisibleAtInsert==newArticles.count`、`newlyAccepted=0`，等价旧逻辑零行为变更。newVisibleAtInsert 在 filterStage 的 await 前算成 Int 避免跨 await 持有 @Model（#23） |
+| RecommendItem/ArticleRow summary 永久 2 行 + 删 hover lineLimit（2026-05-30）| RecommendItemView/ArticleRowView 删 `@State isHovered` + `.onHover` + `.lineLimit(isHovered ? nil : 1)`；改 `.lineLimit(2).fixedSize(horizontal: false, vertical: true)` | hover 改 lineLimit 让 Text 内在高度变化 → 父 VStack 高度变化 → popover NSHostingView 触发 NSWindow `setFrameSize` → 在 `windowDidLayout` 回调 KVO 链路 `invalidateSafeAreaCornerInsets → requestUpdate → setNeedsUpdateConstraints → _postWindowNeedsUpdateConstraints` 抛 NSException → SIGTRAP（鼠标 hover 推荐项必崩，踩坑 #41）。永久 2 行 row 高度恒定 + 摘要可见性反而比 hover 才看更直接（产品决策走 grill Q1-G）。fixedSize(vertical:true) 必需：嵌套 VStack 内 Text 默认按 ideal 渲染 1 行，需明确"宽度由父决定高度按 ideal 多行算" |
+| RecommendItem 色条改 row overlay（2026-05-30）| 色条从 outer HStack child 改为整 row `.overlay(alignment: .leading) { Rectangle().frame(width: 3) }`；padding 同步从 inner HStack 移到外层（leading 12 = 3 色条 + 9 内容缩进；trailing 9；vertical 6）| summary 加 fixedSize(vertical:true) 后 inner VStack/HStack 都变 inflexible vertical，outer HStack layout 协商把 Rectangle `.frame(maxHeight: .infinity)` 当上限不强制撑满 → Rectangle 按自己很小的 ideal size 渲染 → row 上下 padding 6pt 区透明 → 视觉上 row 之间不连续。overlay 不参与 HStack layout 协商，自动 fill receiver 完整 frame 含 padding 区，row 间紧贴时贯穿 |
+| 推荐 ↔ 文章列表互斥折叠 `ExpandedSection` 单字段（2026-05-30）| 新增 `enum ExpandedSection { case recommend, case article }`；MenuBarView `@State expandedSection = .recommend`；两 section 受控 `@Binding<ExpandedSection>`；header tap toggle 在 .recommend/.article 之间；reset 触发：cat 切换 onChange 显式 reset + popover 重开 @State 自然 reset（不写 prefs，产品立场"每次重置"）。RecommendSection header 加 chevron + 整 header 可点（嵌入刷新 Button 事件不冒泡单独可点），折叠/展开形态完全一致只是下方推荐项隐藏 | hover 修复后摘要永久 2 行，5 项推荐区高度 ~440pt 已占大头，文章列表展开同时显示时 16 寸 MBP 总高度 ~1210pt 超 ~130pt 溢出屏幕底（Footer 看不见）。互斥折叠让 article 展开时 recommend 自动折省 ~400pt 给文章列表，listHeight 上限可从 260 上调 480 让 ~5 行文章可见。单字段 enum 是最简表达——B（recommend 可独立折叠）会出现"两者都折空荡 / 两者都展开撑爆 1000 兜底"两种不一致中间态；C（recommend header 完全不可点）失去"想看 article 时直接点 recommend 折叠"的快捷路径。Q1-A 已确认 |
+| popover maxHeight 1000 兜底（2026-05-30）| MenuBarView `.frame(width: 380).frame(maxHeight: 1000, alignment: .top)` | 即使互斥折叠 + listHeight 上限 480 已让 16 寸 MBP 默认 scaled 不溢出（总高 ~880pt），外接小屏 / 低 scaled 模式下 popover 仍可能溢出屏幕。maxHeight 是 1 行兜底常量，Linus 风格——解决 99% 场景，剩 1% 外接小屏未来按需再处理（vs GeometryReader 在 MenuBarExtra(.window) 首次 attach 时尺寸 0 的 quirk）|
+| ArticleListSection rowHeight 80→95 / listHeight 上限 260→480（2026-05-30）| rowHeight 估算 80→95（适配摘要 2 行后实测 ~93pt）；listHeight 上限 260→480（互斥折叠让 recommend 让出 ~400pt 后可上调） | rowHeight 注释原写"标题 2 行 + 摘要 1 行 + padding"，摘要 2 行后单 row 加 ~13pt（一行 caption 字号）；上限同步根据互斥折叠后剩余空间预算重算（recommend 折叠 36pt header + article 折叠 40pt header + Digest 186 + 其他 ~120 → 给 article 480pt 上限合计 880pt < maxHeight 1000）|
 
 ---
 
@@ -415,3 +422,23 @@ v2: 26 个 = 11 AI + 8 财报 + 7 新闻。完整列表见 `Sources/AINewsBar/Se
 - SwiftData 自动迁移加列默认 NULL 是"隐性 schema 演进"，开发者觉得只是改了 init default 不会破坏数据，实际 SQLite 行物理层已经分歧。**任何**对 @Model 字段（特别是非可选字段）的改动都应该当作 schema 不兼容变更对待，跟着 bump schemaVersion。
 - "guard 字段 + 副作用操作"组合中，副作用失败必须中断 guard 推进；只 Log 是不够的（log 是观测，不是拦截）。踩坑 #28 已经在 cleanupOlderThan 类场景说过同样的话，这次复现在 schema migration 场景。
 - "ModelContainer 构造成功"≠"数据完整"。SwiftData 是 lazy validation：fetch 时才校验 mandatory 字段。生产代码不能假设构造成功就是数据可用，启动期主动 fetch 一次代价极小、价值显著。
+
+### 41. SwiftUI hover 改子 view 内在尺寸 → MenuBarExtra(.window) popover NSWindow 重算时抛 NSException 必崩
+**根因**：SwiftUI 6.x + `MenuBarExtra(.window)` 的 popover 用 NSHostingView 承载内容，NSHostingView 监听 NSWindow size 变化重算约束。当 popover 内子 view 内在高度变化（典型场景：`.lineLimit(isHovered ? nil : 1)` 让 Text 从 1 行扩成多行）触发链路：
+1. row 内在高度变化 → 父 VStack 内在高度变化 → MenuBarView 总高度变化
+2. SwiftUI 给 NSHostingView 提议新 size → NSHostingView 调 `-[NSView setFrameSize:]` → NSWindow 改 frame
+3. NSWindow `setFrameSize` 回调 KVO observer 链 → `__reusableDependencyContextForKey_block_invoke` → `NSHostingView.didChangeValue(forKey:)` → `invalidateSafeAreaCornerInsets`
+4. invalidate → `ViewGraphRootValueUpdater.invalidateProperties` → `NSHostingView.requestUpdate(after:)` → `NSHostingView.setNeedsUpdate()` → `-[NSView setNeedsUpdateConstraints:]`
+5. `_informContainerThatSubviewsNeedUpdateConstraints` → `-[NSWindow _postWindowNeedsUpdateConstraints]` 在 window layout 周期内**第二次**调用时抛 NSException → `objc_exception_throw` → SIGTRAP
+
+外显：鼠标 hover 推荐项必崩（用户报告"鼠标移动到推荐文章上闪退"，crash log EXC_BREAKPOINT signal SIGTRAP type 5）。
+
+**修复**（grill 4 轮收敛产品决策 G）：
+- 删 `@State isHovered` + `.onHover` + 动态 lineLimit
+- summary 永久 `.lineLimit(2).fixedSize(horizontal: false, vertical: true)` 让 row 高度恒定
+- 同步色条 layout 问题：summary fixedSize 后 inner VStack/HStack 都变 inflexible vertical → outer HStack 把色条 `.frame(maxHeight: .infinity)` 当上限不强制撑满 → row 之间 padding 区透明视觉不连续。改色条为整 row `.overlay(alignment: .leading)` 自动 fill receiver 完整 frame 含 padding 区
+
+**心得**：
+- macOS SwiftUI 内 popover、菜单栏窗口、tooltip 这类"window-anchored" view，**子 view 内在尺寸变化是危险动作**——任何 hover、focus、selection 引起的尺寸变化都可能触发 window 重布局，进而触发系统层的"在 layout 周期内不能再次调 setNeedsUpdate"约束抛异常。同款陷阱在 `.popover()`、`Menu`、`MenuBarExtra` 内都已知。
+- 防御原则：popover 内交互态变化优先用**不改 size 的属性**（颜色、透明度、阴影、border、scale 变换），避免动态 `lineLimit / font / padding / frame`。看全摘要的需求改为 lineLimit 常量值更高 / 独立 tooltip / 独立 popover。
+- SwiftUI Layout 协商隐性陷阱：`.frame(maxHeight: .infinity)` 在某些上下文里只被当作上限不强制撑满（特别是当父级或兄弟 view 通过 fixedSize 变 inflexible 后），需要换 `.overlay { ... }`（自动 fill receiver）或显式给 frame(height:) 才能保证撑满。HStack(alignment: .center) 默认 layout 协商优先用 inflexible child 决定 stack 高度，flexible child 接受 available — 但 SwiftUI 6.x 在 fixedSize 链路上有时不传播完整可用空间给 flexible Shape。

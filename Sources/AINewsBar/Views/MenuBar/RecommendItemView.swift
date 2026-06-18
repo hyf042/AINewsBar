@@ -30,14 +30,19 @@ struct RecommendItemView: View {
                     // summary 永久 2 行（删 hover 切换 lineLimit）。
                     // hover 改 lineLimit 会让 row 内在高度变化 → 父 VStack 高度变化 →
                     // popover NSWindow 重算 size → SwiftUI 6.x + MenuBarExtra(.window)
-                    // 在 _postWindowNeedsUpdateConstraints 链路抛 NSException → SIGTRAP。
+                    // 在 _postWindowNeedsUpdateConstraints 链路抛 NSException → SIGTRAP（踩坑 #41）。
                     // fixedSize(vertical: true) 必需：嵌套 VStack 内的 Text 默认按 ideal
                     // size 渲染 1 行，需明确告诉 SwiftUI "宽度由父决定，高度按 ideal 多行算"。
+                    //
+                    // 超 2 行的全文通过 .help() 原生 tooltip 在 hover 时展示：与 #41 的本质区别是
+                    // tooltip 是系统级独立窗口，完全不改 row 内在尺寸 / 不触发 popover NSWindow 重算，
+                    // 因此安全（#41 的禁忌只针对"hover 改 row 自身尺寸"，不针对"hover 弹独立窗口"）。
                     Text(summary)
                         .font(Typography.caption)
                         .foregroundStyle(TextColor.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
+                        .help(summary)
                 }
             }
             Spacer()

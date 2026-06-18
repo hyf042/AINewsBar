@@ -38,6 +38,10 @@ struct CategoryState: Sendable {
 
 /// 编排者（Facade）：聚合 per-cat @Published 状态、调度 RSS / Pipeline / Engine / FilterPipeline、原子提交持久化。
 /// 状态全 per-cat（states dict）。UI 读走 `state(for:)`；改 state 走 `mutate`（内部）/ `markAvailability`（公开）/ `_testMutate`（DEBUG）。
+///
+/// 拆分：核心编排 + 生命周期（本文件）、RSS 抓取/去重/清理（RefreshService+RSS.swift）、
+/// AI Filter/Summary/Recommend/Digest/Commit（RefreshService+AI.swift）。
+/// 跨 extension 调用的原 private 方法改为 internal（不设修饰符），外部模块不受影响。
 @MainActor
 final class RefreshService: ObservableObject {
     /// `shared` 提供全局入口（AppDelegate 启动期调用）；View 层通过 `@StateObject = .shared`
@@ -77,7 +81,7 @@ final class RefreshService: ObservableObject {
     }
 
     /// 单一变更点。约定：block 内禁止递归调 mutate（哪怕跨 cat），否则会触发多次 @Published 通知。
-    private func mutate(_ cat: AINewsBar.Category, _ block: (inout CategoryState) -> Void) {
+    func mutate(_ cat: AINewsBar.Category, _ block: (inout CategoryState) -> Void) {
         var state = states[cat] ?? CategoryState()
         block(&state)
         states[cat] = state
@@ -90,38 +94,38 @@ final class RefreshService: ObservableObject {
     }
     #endif
 
-    // MARK: - Dependencies (注入)
+    // MARK: - Dependencies (注入) — internal 供 extension 文件访问
 
-    private let rss: any RSSFetching
-    private let ai: any AISummarizing
-    private let prefs: any PreferencesStoring
+    let rss: any RSSFetching
+    let ai: any AISummarizing
+    let prefs: any PreferencesStoring
 
-    // MARK: - Components (内部组合)
+    // MARK: - Components (内部组合) — internal 供 extension 文件访问
 
-    private let summaryPipeline: SummaryPipeline
-    private let recommendEngine: RecommendEngine
-    private let digestEngine: DigestEngine
+    let summaryPipeline: SummaryPipeline
+    let recommendEngine: RecommendEngine
+    let digestEngine: DigestEngine
 
-    // MARK: - Usage tracking
+    // MARK: - Usage tracking — internal 供 extension 文件访问
 
-    private var usage: (any UsageRecording)?
+    var usage: (any UsageRecording)?
 
-    // MARK: - Tuning
+    // MARK: - Tuning — internal 供 extension 文件访问
 
-    private let refreshInterval: TimeInterval = 3600
-    private let staleThreshold: TimeInterval = 1800
-    private let digestRegenerateInterval: TimeInterval = 3 * 3600
-    private let summaryDeltaThreshold = 3
-    private let maxConcurrentSummaries = 5
-    private let coverageThreshold = 0.8
-    private let usageRetentionDays = 30
-    private let filterMaxFailures = 3
+    let refreshInterval: TimeInterval = 3600
+    let staleThreshold: TimeInterval = 1800
+    let digestRegenerateInterval: TimeInterval = 3 * 3600
+    let summaryDeltaThreshold = 3
+    let maxConcurrentSummaries = 5
+    let coverageThreshold = 0.8
+    let usageRetentionDays = 30
+    let filterMaxFailures = 3
 
     /// per-cat "未配置 API Key" reason 唯一文案。applyCredentialChange 精确比对这一条，
     /// 不能误清"摘要调用多数失败"等 non-credential 业务错误。
     static let missingCredentialReason = "未配置 API Key"
 
-    // MARK: - Mutable
+    // MARK: - Mutable (private)
 
     private var timer: Timer?
     private var modelContext: ModelContext?
@@ -132,10 +136,6 @@ final class RefreshService: ObservableObject {
     private var refreshTasks: [AINewsBar.Category: Task<Void, Never>] = [:]
 
     /// 正在跑摘要 pipeline 的 cat 集合。`isSummarizing(category:)` 从中派生。
-    /// @Published：集合变化即触发 objectWillChange，驱动读 `isSummarizing(category:)`
-    /// 的 view（HeaderView / RecommendSectionView / DigestSectionView）重渲染。
-    /// 旧实现靠一个冗余全局 `isSummarizing` Bool 承担此通知，但没有 view 读它，且会
-    /// 误导成"可用全局 flag"（一个 tab 处理就禁用所有 tab）；删掉后由集合本身发通知。
     @Published private(set) var activeSummaryPipelineCats: Set<AINewsBar.Category> = []
 
     // MARK: - Init
@@ -415,126 +415,6 @@ final class RefreshService: ObservableObject {
         usage?.cleanupOlderThan(days: usageRetentionDays)
     }
 
-    // MARK: - Filter Stage
-
-    /// Filter stage 产出：persisted 决定是否继续 AI pipeline；newlyAccepted 是本轮 filter 新判
-    /// accepted=true 的篇数 —— 代表"本轮新增的用户可见文章"，供派生内容触发决策（避免全 reject 时白烧 token）。
-    private struct FilterStageOutcome {
-        let persisted: Bool
-        let newlyAccepted: Int
-        /// noop / 无 pending：放行后续 AI，无新可见内容。
-        static let proceed = FilterStageOutcome(persisted: true, newlyAccepted: 0)
-        /// 持久化失败：中止 AI pipeline。
-        static let abort = FilterStageOutcome(persisted: false, newlyAccepted: 0)
-    }
-
-    /// AI Filter：仅对配了 filterPrompt 的 cat 启用。
-    /// fetch accepted==nil && filterFailCount<3 → FilterPipeline → 写回 accepted / 累加 filterFailCount。
-    private func runFilterStage(cat: AINewsBar.Category, context: ModelContext) async -> FilterStageOutcome {
-        let config = CategoryConfig.for(cat)
-        guard let filterPrompt = config.filterPrompt else { return .proceed }
-
-        let catRaw = cat.rawValue
-        let maxFailures = filterMaxFailures
-        let pending: [Article]
-        do {
-            pending = try context.safeFetchOrThrow(
-                FetchDescriptor<Article>(predicate: #Predicate {
-                    $0.category == catRaw && $0.accepted == nil && $0.filterFailCount < maxFailures
-                })
-            )
-        } catch {
-            Log.write("[Filter][\(catRaw)] fetch pending failed: \(error)")
-            mutate(cat) { $0.lastError = "数据库查询失败，跳过筛选" }
-            return .abort
-        }
-        guard !pending.isEmpty else { return .proceed }
-        guard let (apiKey, model) = ensureCredentials(cat: cat) else { return .abort }
-
-        let tasks = pending.map {
-            FilterPipeline.Task(
-                id: $0.id, title: $0.title,
-                description: $0.content ?? "",
-                category: cat
-            )
-        }
-        let pipeline = FilterPipeline(ai: ai, maxConcurrent: 5, promptTemplate: filterPrompt)
-        let result = await pipeline.run(tasks: tasks, apiKey: apiKey, model: model)
-
-        // 写回 Article（用 id 重 fetch alive，避免持有跨 await @Model 引用）。
-        // 仅 classificationFailedIds 计入 filterFailCount；transientFailedIds（HTTP/网络/credential）
-        // 保持 accepted=nil，下轮 refresh 的 pending 谓词会再抓到重试，避免网络抖动永久 reject 财报文章。
-        let acceptedSet = Set(result.acceptedIds)
-        let rejectedSet = Set(result.rejectedIds)
-        let classificationFailedSet = Set(result.classificationFailedIds)
-        // transient 不写（accepted/filterFailCount 都不动），省一次 fetch
-        let writeIds = Array(acceptedSet) + Array(rejectedSet) + Array(classificationFailedSet)
-
-        var persistSucceeded = true
-        if !writeIds.isEmpty {
-            let alive: [Article]
-            do {
-                alive = try context.safeFetchOrThrow(
-                    FetchDescriptor<Article>(predicate: #Predicate { writeIds.contains($0.id) })
-                )
-            } catch {
-                mutate(cat) { $0.lastError = "数据库查询失败，跳过筛选结果保存" }
-                Log.write("[Filter][\(catRaw)] refetch alive articles failed: \(error)")
-                persistSucceeded = false
-                alive = []
-            }
-
-            for article in alive {
-                if acceptedSet.contains(article.id) {
-                    article.accepted = true
-                } else if rejectedSet.contains(article.id) {
-                    article.accepted = false
-                } else if classificationFailedSet.contains(article.id) {
-                    article.recordFilterFailure(maxBeforeReject: filterMaxFailures)
-                    if article.accepted == false {
-                        Log.write("[Filter][\(catRaw)] permanently rejecting after \(filterMaxFailures) classification failures: \(article.title.prefix(30))")
-                    }
-                }
-            }
-            if persistSucceeded {
-                do {
-                    try context.safeSaveOrThrow()
-                } catch {
-                    context.rollback()
-                    mutate(cat) { $0.lastError = "筛选结果保存失败" }
-                    Log.write("[Filter][\(catRaw)] save failed: \(error)")
-                    persistSucceeded = false
-                }
-            }
-        }
-
-        // transient 错误期间至少把 globalAIError 提示用户（不污染 per-cat unavailable，可能下轮自愈）。
-        if let transientGlobal = result.firstTransientGlobalError {
-            globalAIError = transientGlobal
-        }
-
-        // filter 持久化成功后补 postUnreadCount：财报文章入库时 accepted=nil 被过滤掉，
-        // 这里 accepted 变 true/false 改变计数，menu bar label 只听通知，不补就 stale。
-        if persistSucceeded && !writeIds.isEmpty {
-            postUnreadCount(context: context)
-        }
-
-        // accepted + rejected 记 token；classificationFailed 与 transientFailed 不记 token；
-        // 仅 classificationFailed 记 recordFailure（transient 不算 AI 服务质量损坏）。
-        for usageInfo in result.usages {
-            usage?.record(scene: .filter, category: cat, model: model,
-                          info: usageInfo, success: persistSucceeded)
-        }
-        for _ in result.classificationFailedIds {
-            usage?.recordFailure(scene: .filter, category: cat, model: model)
-        }
-        // newlyAccepted = 本轮 filter 判 accepted=true 数（持久化失败时无意义，置 0）。
-        return FilterStageOutcome(
-            persisted: persistSucceeded,
-            newlyAccepted: persistSucceeded ? acceptedSet.count : 0
-        )
-    }
-
     // MARK: - Force regenerate (per-cat)
 
     func forceRegenerateRecommend(_ cat: AINewsBar.Category = .ai) async {
@@ -575,7 +455,7 @@ final class RefreshService: ObservableObject {
         await runDigest(cat: cat, snapshot: snapshot, apiKey: apiKey, model: model)
     }
 
-    // MARK: - Private: persisted state
+    // MARK: - Persisted state
 
     private func loadPersistedStateAllCats() {
         for cat in AINewsBar.Category.allCases {
@@ -598,270 +478,10 @@ final class RefreshService: ObservableObject {
         }
     }
 
-    // MARK: - Private: AI pipeline (per-cat)
-
-    private func processAI(cat: AINewsBar.Category, context: ModelContext, hasNewArticles: Bool) async {
-        guard let (apiKey, model) = ensureCredentials(cat: cat) else { return }
-
-        let catRaw = cat.rawValue
-        let pendingTasks: [SummaryPipeline.Task]
-        do {
-            // 仅处理该 cat、accepted=true、aiSummary=nil 的文章
-            let pending = try context.safeFetchOrThrow(
-                FetchDescriptor<Article>(predicate: #Predicate {
-                    $0.category == catRaw && $0.accepted == true && $0.aiSummary == nil
-                })
-            )
-            pendingTasks = pending.map {
-                SummaryPipeline.Task(id: $0.id, title: $0.title, content: $0.content, category: cat)
-            }
-        } catch {
-            mutate(cat) { $0.lastError = "数据库查询失败，跳过本次 AI 处理" }
-            return
-        }
-        let coverage: Bool
-        if pendingTasks.isEmpty {
-            coverage = true
-        } else {
-            beginSummaryPipeline(cat)
-            let result = await summaryPipeline.run(tasks: pendingTasks, apiKey: apiKey, model: model)
-            endSummaryPipeline(cat)
-            if let globalError = result.globalError {
-                self.globalAIError = globalError
-            } else if !result.completed.isEmpty {
-                clearGlobalAIErrorAfterAISuccess()
-            }
-            commitSummaries(cat: cat, result: result, model: model, context: context)
-            coverage = result.completionRate >= coverageThreshold
-            if !coverage && !result.failedIds.isEmpty {
-                mutate(cat) {
-                    $0.aiAvailability = .unavailable("摘要调用多数失败 (\(result.failedIds.count)/\(result.total))")
-                }
-            }
-        }
-
-        let snapshot: ArticleSnapshot
-        do {
-            snapshot = try ArticleSnapshot.captureOrThrow(from: context, category: cat)
-        } catch {
-            mutate(cat) { $0.lastError = "数据库查询失败，跳过推荐/摘要生成" }
-            return
-        }
-        guard snapshot.summarizedCount >= 3 else { return }
-
-        let s = state(for: cat)
-        // coverage gate 同时挡 recommend 与 digest："摘要质量不足就不生成派生内容"。
-        // RecommendEngine 用 snapshot.summarized，coverage 不足意味候选含 nil-summary 文章。
-        if !coverage {
-            Log.write("[Recommend][\(catRaw)] skip — coverage below threshold")
-        } else if RefreshDecision.shouldRegenerateRecommend(
-            hasNewArticles: hasNewArticles,
-            isEmpty: s.recommendedArticleIDs.isEmpty,
-            currentCount: snapshot.summarizedCount,
-            lastCount: s.recommendArticleCount,
-            deltaThreshold: summaryDeltaThreshold
-        ) {
-            await runRecommend(cat: cat, snapshot: snapshot, apiKey: apiKey, model: model)
-        } else {
-            Log.write("[Recommend][\(catRaw)] skip — delta=\(snapshot.summarizedCount - s.recommendArticleCount), hasNew=\(hasNewArticles)")
-        }
-
-        if !coverage {
-            Log.write("[Digest][\(catRaw)] skip — coverage below threshold")
-        } else if RefreshDecision.shouldRegenerateDigest(
-            hasNewArticles: hasNewArticles,
-            isPresent: s.dailyDigest != nil,
-            lastDate: s.lastDigestDate,
-            currentCount: snapshot.summarizedCount,
-            lastCount: s.digestArticleCount,
-            regenerateInterval: digestRegenerateInterval,
-            deltaThreshold: summaryDeltaThreshold
-        ) {
-            await runDigest(cat: cat, snapshot: snapshot, apiKey: apiKey, model: model)
-        } else {
-            Log.write("[Digest][\(catRaw)] skip — delta=\(snapshot.summarizedCount - s.digestArticleCount), hasNew=\(hasNewArticles)")
-        }
-    }
-
-    private func runRecommend(
-        cat: AINewsBar.Category, snapshot: ArticleSnapshot,
-        apiKey: String, model: String
-    ) async {
-        do {
-            if let outcome = try await recommendEngine.run(
-                snapshot: snapshot, category: cat, apiKey: apiKey, model: model
-            ) {
-                commit(cat: cat, recommend: outcome, model: model)
-            }
-        } catch {
-            applyGlobalAIErrorIfNeeded(error)
-            mutate(cat) { $0.aiAvailability = .unavailable(error.localizedDescription) }
-            usage?.recordFailure(scene: .recommend, category: cat, model: model)
-            Log.write("[Recommend][\(cat.rawValue)] ERROR: \(error)")
-        }
-    }
-
-    private func runDigest(
-        cat: AINewsBar.Category, snapshot: ArticleSnapshot,
-        apiKey: String, model: String
-    ) async {
-        do {
-            if let outcome = try await digestEngine.run(
-                snapshot: snapshot, category: cat, apiKey: apiKey, model: model
-            ) {
-                commit(cat: cat, digest: outcome, model: model)
-            }
-        } catch {
-            applyGlobalAIErrorIfNeeded(error)
-            mutate(cat) { $0.aiAvailability = .unavailable(error.localizedDescription) }
-            usage?.recordFailure(scene: .digest, category: cat, model: model)
-            Log.write("[Digest][\(cat.rawValue)] ERROR: \(error)")
-        }
-    }
-
-    // MARK: - Private: commit (per-cat 原子更新)
-
-    private func commit(cat: AINewsBar.Category, recommend outcome: RecommendEngine.Outcome, model: String) {
-        mutate(cat) {
-            $0.recommendedArticleIDs = outcome.ids
-            $0.lastRecommendDate = outcome.generatedAt
-            $0.recommendArticleCount = outcome.articleCount
-            $0.aiAvailability = .available
-        }
-        clearGlobalAIErrorAfterAISuccess()
-        prefs.saveRecommendArticleCount(outcome.articleCount, for: cat)
-        usage?.record(scene: .recommend, category: cat, model: model, info: outcome.usage)
-    }
-
-    private func commit(cat: AINewsBar.Category, digest outcome: DigestEngine.Outcome, model: String) {
-        mutate(cat) {
-            $0.dailyDigest = outcome.content
-            $0.lastDigestDate = outcome.generatedAt
-            $0.digestArticleCount = outcome.articleCount
-        }
-        clearGlobalAIErrorAfterAISuccess()
-        prefs.saveDigest(content: outcome.content, date: outcome.generatedAt, for: cat)
-        prefs.saveDigestArticleCount(outcome.articleCount, for: cat)
-        usage?.record(scene: .digest, category: cat, model: model, info: outcome.usage)
-        // 不重置 aiAvailability —— Recommend 设的 .unavailable 应保留
-    }
-
-    /// 摘要原子持久化：safeSaveOrThrow 失败用 context.rollback() 撤回内存改动（保证内存/磁盘一致）
-    /// + 设 .unavailable + token 记 success=false。
-    private func commitSummaries(
-        cat: AINewsBar.Category, result: SummaryPipeline.Result, model: String,
-        context: ModelContext
-    ) {
-        let map = Dictionary(uniqueKeysWithValues: result.completed.map { ($0.id, $0) })
-
-        var persistSucceeded = true
-        if !map.isEmpty {
-            let ids = Array(map.keys)
-            do {
-                let alive = try context.safeFetchOrThrow(
-                    FetchDescriptor<Article>(predicate: #Predicate { ids.contains($0.id) })
-                )
-                for article in alive {
-                    if let item = map[article.id] { article.aiSummary = item.summary }
-                }
-                try context.safeSaveOrThrow()
-            } catch {
-                context.rollback()
-                mutate(cat) { $0.aiAvailability = .unavailable("摘要保存失败") }
-                Log.write("[Summary][\(cat.rawValue)] commit failed, rolled back: \(error)")
-                persistSucceeded = false
-            }
-        }
-
-        for item in result.completed {
-            // 走 helper record(info:success:)：persistSucceeded=false 时 token 自动归零。
-            usage?.record(
-                scene: .summary, category: cat, model: model,
-                info: item.usage, success: persistSucceeded
-            )
-        }
-        for _ in result.failedIds {
-            usage?.recordFailure(scene: .summary, category: cat, model: model)
-        }
-    }
-
-    // MARK: - Private: RSS fetch helpers
-
-    private struct FeedResult: Sendable {
-        let articles: [RawArticle]
-        let feedID: UUID
-        let feedTitle: String
-        let feedCategory: AINewsBar.Category
-        let feedSkipFilter: Bool
-        let error: String?
-    }
-
-    private func fetchAllFeeds(feeds: [Feed]) async -> (results: [FeedResult], errors: [String]) {
-        let rssRef = rss
-        var rawResults: [FeedResult] = []
-        await withTaskGroup(of: FeedResult.self) { group in
-            for feed in feeds {
-                let feedID = feed.id
-                let feedURL = feed.url
-                let feedTitle = feed.title
-                let feedCat = AINewsBar.Category.from(rawValue: feed.category)
-                let skipFilter = feed.skipFilter
-                group.addTask {
-                    do {
-                        let articles = try await rssRef.fetchRawArticles(feedURL: feedURL)
-                        return FeedResult(articles: articles, feedID: feedID, feedTitle: feedTitle,
-                                          feedCategory: feedCat, feedSkipFilter: skipFilter, error: nil)
-                    } catch {
-                        return FeedResult(articles: [], feedID: feedID, feedTitle: feedTitle,
-                                          feedCategory: feedCat, feedSkipFilter: skipFilter,
-                                          error: "\(feedTitle): \(error.localizedDescription)")
-                    }
-                }
-            }
-            for await result in group { rawResults.append(result) }
-        }
-        let errors = rawResults.compactMap(\.error)
-        return (rawResults, errors)
-    }
-
-    /// 双重去重（existingURLs + seenURLs）；丢 nil pubDate；article.category 从 feed 派生；
-    /// 未配 filter 或 feed.skipFilter 时 accepted 直接为 true。
-    private func mergeNewArticles(
-        cat: AINewsBar.Category,
-        rawResults: [FeedResult],
-        existingURLs: Set<String>,
-        startOfToday: Date
-    ) -> [Article] {
-        let config = CategoryConfig.for(cat)
-        let needFilter = (config.filterPrompt != nil)
-        var newArticles: [Article] = []
-        var seenURLs: Set<String> = []
-        for result in rawResults {
-            let acceptedAtInsert: Bool? = (!needFilter || result.feedSkipFilter) ? true : nil
-            for raw in result.articles {
-                // 归一化后比对（仅判定"是否同一篇"）；存储仍用原 raw.url 保留追踪参数。
-                let key = URLNormalizer.normalize(raw.url)
-                guard let pubDate = raw.publishedAt,
-                      !existingURLs.contains(key),
-                      !seenURLs.contains(key),
-                      pubDate >= startOfToday else { continue }
-                seenURLs.insert(key)
-                newArticles.append(Article(
-                    title: raw.title, url: raw.url, content: raw.content,
-                    publishedAt: pubDate,
-                    feedID: result.feedID, feedTitle: result.feedTitle,
-                    category: result.feedCategory,
-                    accepted: acceptedAtInsert
-                ))
-            }
-        }
-        return newArticles
-    }
-
-    // MARK: - Private: misc
+    // MARK: - Credentials (internal — extension 文件调用)
 
     /// 纯查询：读 prefs 返回 credentials，无副作用。缺 key 返回 nil。
-    private func currentCredentials() -> (apiKey: String, model: String)? {
+    func currentCredentials() -> (apiKey: String, model: String)? {
         let key = prefs.getAPIKey() ?? ""
         guard !key.isEmpty else { return nil }
         return (key, prefs.getModel())
@@ -870,7 +490,7 @@ final class RefreshService: ObservableObject {
     /// 命令式：在 currentCredentials 上叠加副作用 —— 缺 key 时设 globalAIError + per-cat unavailable
     /// （reason 用 missingCredentialReason，applyCredentialChange 依赖此字面值精确匹配）；
     /// 存在则清掉之前的 invalidAPIKey error。
-    private func ensureCredentials(cat: AINewsBar.Category) -> (apiKey: String, model: String)? {
+    func ensureCredentials(cat: AINewsBar.Category) -> (apiKey: String, model: String)? {
         guard let creds = currentCredentials() else {
             globalAIError = .invalidAPIKey
             mutate(cat) { $0.aiAvailability = .unavailable(Self.missingCredentialReason) }
@@ -880,15 +500,19 @@ final class RefreshService: ObservableObject {
         return creds
     }
 
-    private func applyGlobalAIErrorIfNeeded(_ error: Error) {
+    // MARK: - AI helpers (internal — extension 文件调用)
+
+    func applyGlobalAIErrorIfNeeded(_ error: Error) {
         if let mapped = GlobalAIError.from(error) {
             globalAIError = mapped
         }
     }
 
-    private func clearGlobalAIErrorAfterAISuccess() {
+    func clearGlobalAIErrorAfterAISuccess() {
         globalAIError = nil
     }
+
+    // MARK: - Timer / Pipeline state
 
     private func scheduleTimer() {
         timer?.invalidate()
@@ -900,13 +524,15 @@ final class RefreshService: ObservableObject {
         }
     }
 
-    private func beginSummaryPipeline(_ cat: AINewsBar.Category) {
+    func beginSummaryPipeline(_ cat: AINewsBar.Category) {
         activeSummaryPipelineCats.insert(cat)
     }
 
-    private func endSummaryPipeline(_ cat: AINewsBar.Category) {
+    func endSummaryPipeline(_ cat: AINewsBar.Category) {
         activeSummaryPipelineCats.remove(cat)
     }
+
+    // MARK: - Cross-day reset
 
     /// 跨日全 cat 重置：lastResetCheckDate 不在今天时执行。幂等。
     /// 调用点：refresh / forceRegenerate* / refreshIfNeeded / timer / 系统唤醒。
@@ -948,32 +574,6 @@ final class RefreshService: ObservableObject {
         postUnreadCount(context: context)
         lastResetCheckDate = Date()
         Log.write("[Refresh] cross-day check complete (clearedState=\(shouldClearState))")
-    }
-
-    /// per-cat 清旧文章（runRefresh 内用）。严格版：fetch/save 失败抛出，让 caller rollback + 中止，
-    /// 避免留 pending delete 给后续路径。
-    private func cleanupOldArticles(
-        context: ModelContext, category: AINewsBar.Category, before date: Date
-    ) throws {
-        let catRaw = category.rawValue
-        let old = try context.safeFetchOrThrow(
-            FetchDescriptor<Article>(predicate: #Predicate {
-                $0.category == catRaw && $0.publishedAt < date
-            })
-        )
-        guard !old.isEmpty else { return }
-        old.forEach { context.delete($0) }
-        try context.safeSaveOrThrow()
-    }
-
-    /// 全 cat 清旧文章（跨日重置内用）。严格版（与 per-cat 对齐）：失败抛出让 caller 不推进 lastResetCheckDate。
-    private func cleanupOldArticles(context: ModelContext, before date: Date) throws {
-        let old = try context.safeFetchOrThrow(
-            FetchDescriptor<Article>(predicate: #Predicate { $0.publishedAt < date })
-        )
-        guard !old.isEmpty else { return }
-        old.forEach { context.delete($0) }
-        try context.safeSaveOrThrow()
     }
 }
 

@@ -22,16 +22,39 @@ final class PreferencesService: PreferencesStoring {
     /// 时升级后主流程仍会 HTTP 401（"Authorization: Bearer sk-...\n"），除非用户重新
     /// 进设置页保存触发 UI 路径的 trim。底层 service 读写都 trim 兜底治历史脏数据。
     /// caller (UI / RefreshService / BailianService) 不需感知。
+    ///
+    /// **Base64 编码**（C1 review）：UserDefaults 是 plist 文件，明文 API Key 可被
+    /// `strings` 命令直接读出。Base64 不提供真实加密（任何人可解码），但能防止 casual
+    /// 扫描拿到可用的 key。读取时兼容旧版明文存储，首次命中自动迁移到编码格式。
 
     func saveAPIKey(_ key: String) {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        defaults.set(trimmed.isEmpty ? nil : trimmed, forKey: apiKeyKey)
+        guard !trimmed.isEmpty else {
+            defaults.removeObject(forKey: apiKeyKey)
+            return
+        }
+        let encoded = Data(trimmed.utf8).base64EncodedString()
+        defaults.set(encoded, forKey: apiKeyKey)
     }
 
     func getAPIKey() -> String? {
-        let value = defaults.string(forKey: apiKeyKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (value?.isEmpty == false) ? value : nil
+        guard let stored = defaults.string(forKey: apiKeyKey) else { return nil }
+        // 当前格式：Base64 编码
+        if let data = Data(base64Encoded: stored),
+           let key = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+           !key.isEmpty {
+            return key
+        }
+        // 旧版明文存储（迁移路径）：读到后自动升级为编码格式
+        let legacy = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !legacy.isEmpty else {
+            defaults.removeObject(forKey: apiKeyKey)
+            return nil
+        }
+        let encoded = Data(legacy.utf8).base64EncodedString()
+        defaults.set(encoded, forKey: apiKeyKey)
+        return legacy
     }
 
     func deleteAPIKey() {

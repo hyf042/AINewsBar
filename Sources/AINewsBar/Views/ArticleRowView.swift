@@ -33,16 +33,20 @@ struct ArticleRowView: View {
 
                 if let summary = article.aiSummary {
                     // summary 永久 2 行（与 RecommendItemView 一致；删 hover 切换）。
-                    // 同款崩溃路径：hover 改 lineLimit → row 高度变化 → popover 重算 → 崩。
+                    // 同款崩溃路径：hover 改 lineLimit → row 高度变化 → popover 重算 → 崩（踩坑 #41）。
                     // ArticleRow 虽在 List 内 List 会吸收 size 变化不直接崩，
                     // 但永久 2 行同时改善可见性，保持两个 row 设计一致。
                     // fixedSize(vertical: true) 必需：保证 Text 按多行 ideal size 渲染。
+                    //
+                    // 超 2 行全文通过 .help() 原生 tooltip 在 hover 时展示（与 RecommendItemView 一致）：
+                    // tooltip 是系统级独立窗口，不改 row 尺寸 / 不触发 popover 重算，故安全。
                     Text(summary)
                         .font(Typography.caption)
                         .foregroundStyle(TextColor.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.leading)
+                        .help(summary)
                 }
             }
         }

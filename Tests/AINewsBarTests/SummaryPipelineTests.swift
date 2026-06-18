@@ -19,7 +19,7 @@ final class SummaryPipelineTests: XCTestCase {
     }
 
     private func makeTask(_ title: String) -> SummaryPipeline.Task {
-        SummaryPipeline.Task(id: UUID(), title: title, content: "c-\(title)")
+        SummaryPipeline.Task(id: UUID(), title: title, content: "c-\(title)", category: .ai)
     }
 
     func testEmptyTasksReturnsZero() async {

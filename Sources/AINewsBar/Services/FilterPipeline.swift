@@ -49,66 +49,49 @@ struct FilterPipeline {
     let maxConcurrent: Int
     let promptTemplate: String   // 来自 CategoryConfig.filterPrompt（caller 确保非 nil）
 
-    /// 有界并发执行。Task.isCancelled 时停止派发 + cancelAll；cancelled 不污染 failed*Ids。
     func run(tasks: [Task], apiKey: String, model: String) async -> Result {
         guard !tasks.isEmpty else { return .empty }
-        Log.write("[Filter] pending=\(tasks.count), concurrency=\(maxConcurrent)")
 
         let aiRef = ai
         let template = promptTemplate
-        let cap = maxConcurrent
         var accepted: [UUID] = []
         var rejected: [UUID] = []
         var classificationFailed: [UUID] = []
         var transientFailed: [UUID] = []
         var firstTransient: GlobalAIError?
-        var cancelled = 0
         var usages: [UsageInfo] = []
 
-        await withTaskGroup(of: TaskOutcome.self) { group in
-            var next = min(cap, tasks.count)
-            for i in 0..<next {
-                if _Concurrency.Task.isCancelled { break }
-                let t = tasks[i]
-                group.addTask {
-                    await Self.runOne(t, apiKey: apiKey, model: model,
-                                      ai: aiRef, prompt: template)
-                }
+        let outcomes = await PipelineConcurrency.run(
+            items: tasks,
+            maxConcurrent: maxConcurrent,
+            logPrefix: "[Filter]",
+            runOne: { task in
+                // 取消时返回 nil，不计入任何分类
+                await Self.runOne(task, apiKey: apiKey, model: model,
+                                  ai: aiRef, prompt: template)
             }
-            for await outcome in group {
-                if _Concurrency.Task.isCancelled {
-                    group.cancelAll()
-                }
-                switch outcome {
-                case .accepted(let id, let usage):
-                    accepted.append(id)
-                    usages.append(usage)
-                case .rejected(let id, let usage):
-                    rejected.append(id)
-                    usages.append(usage)
-                case .classificationFailed(let id):
-                    classificationFailed.append(id)
-                    // 不记 usage：BailianError.malformedResponse 抛错前 token 可忽略
-                case .transientFailed(let id, let global):
-                    transientFailed.append(id)
-                    if firstTransient == nil, global != nil {
-                        firstTransient = global
-                    }
-                case .cancelled:
-                    cancelled += 1
-                }
-                if next < tasks.count, !_Concurrency.Task.isCancelled {
-                    let t = tasks[next]
-                    next += 1
-                    group.addTask {
-                        await Self.runOne(t, apiKey: apiKey, model: model,
-                                          ai: aiRef, prompt: template)
-                    }
+        )
+
+        for outcome in outcomes {
+            switch outcome {
+            case .accepted(let id, let usage):
+                accepted.append(id)
+                usages.append(usage)
+            case .rejected(let id, let usage):
+                rejected.append(id)
+                usages.append(usage)
+            case .classificationFailed(let id):
+                classificationFailed.append(id)
+            case .transientFailed(let id, let global):
+                transientFailed.append(id)
+                if firstTransient == nil, global != nil {
+                    firstTransient = global
                 }
             }
         }
 
-        let result = Result(
+        let cancelled = tasks.count - outcomes.count
+        return Result(
             acceptedIds: accepted, rejectedIds: rejected,
             classificationFailedIds: classificationFailed,
             transientFailedIds: transientFailed,
@@ -116,8 +99,6 @@ struct FilterPipeline {
             firstTransientGlobalError: firstTransient,
             total: tasks.count
         )
-        Log.write("[Filter] done: \(accepted.count) accepted, \(rejected.count) rejected, \(classificationFailed.count) classFail, \(transientFailed.count) transient, \(cancelled) cancelled, total=\(tasks.count)")
-        return result
     }
 
     private enum TaskOutcome: Sendable {
@@ -127,28 +108,27 @@ struct FilterPipeline {
         case classificationFailed(UUID)
         /// HTTP / 网络 / credential / 其他临时错误 → 不累计；可用第二个参数提示全局
         case transientFailed(UUID, GlobalAIError?)
-        case cancelled
     }
 
+    /// 返回 nil = 取消，不计入任何分类。
     private static func runOne(
         _ t: Task, apiKey: String, model: String,
         ai: any AISummarizing, prompt: String
-    ) async -> TaskOutcome {
-        if _Concurrency.Task.isCancelled { return .cancelled }
+    ) async -> TaskOutcome? {
+        if _Concurrency.Task.isCancelled { return nil }
         do {
             let (accepted, usage) = try await ai.classifyArticle(
                 title: t.title, description: t.description,
                 prompt: prompt, apiKey: apiKey, model: model
             )
-            if _Concurrency.Task.isCancelled { return .cancelled }
+            if _Concurrency.Task.isCancelled { return nil }
             return accepted ? .accepted(t.id, usage) : .rejected(t.id, usage)
         } catch is CancellationError {
-            return .cancelled
+            return nil
         } catch {
             // P1 第七轮 review：仅 BailianError.malformedResponse 算"模型确实无法分类"，
             // 其他全归 transient（HTTP 401/403/429/5xx、网络抖动、未知错误），不计入
             // filterFailCount，让下一轮 refresh 自然重试。
-            // 防止网络问题把财报文章永久 reject。
             if case BailianError.malformedResponse = error {
                 Log.write("[Filter] classificationFailed: \(t.title.prefix(30)) — \(error.localizedDescription)")
                 return .classificationFailed(t.id)

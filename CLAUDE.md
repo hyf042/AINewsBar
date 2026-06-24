@@ -12,197 +12,65 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 
 ## 演进时间线
 
-| 日期 | 增量 | commit |
-|---|---|---|
-| ~2026-05-20 | v1 阶段全功能完成（单 AI tab）；外观+Pipeline+Engine 拆分；ModelContext+Safe；UsageInfo 三方法返回；AISummarizing 显式 model 参数 | — |
-| 2026-05-21 | 每日 Token 用量统计（grill 7 轮）+ Linus review 5 项（详见踩坑 #13-#15 / #17）| — |
-| 2026-05-22 早 | 相对时间格式器（#18）+ 跨日全量重置（#19）+ 推荐项三重未读视觉（#20）| — |
-| 2026-05-22 晚 | 14 项严重 review 修复：跨日 guard 解耦 / Silent failure 三联（#22-#24）/ force-auto 互斥（#25）/ Pipeline 取消（#26）/ 8 项单点 | `0e5b4fd` |
-| 2026-05-23 | DesignTokens 体系（Typography 8 / TextColor 5 / BrandColor 3）+ 8 view token 化 + 5 项 UI 视觉收敛 | `363c5f2` → `e1e75d4` |
-| 2026-05-24 | MarkdownStripper（AI 输出净化）+ DigestSection 默认展开 + Prompt 加纯文本约束 | — |
-| 2026-05-25 | v2 多分类重构（Schema v2 / FilterPipeline / 27 源 / RefreshService dict 化 / Migration 全清 / CategoryTabBar）；测试 149 → 186 | `ec7f254` → `e3e8282` |
-| 2026-05-25 晚 | **Linus review 16 项**（C1+H1-H6+M1-M5+L1-L3）；测试 186 → 208 | `3d57710` `a11a8f5` |
-| 2026-05-25 夜 | 6 项设置持久化 / RSS Atom 边界加固：FeedSettingsStore 抽出 / openArticle 失败处理 / Atom rel=alternate 优先（踩坑 #38）；测试 208 → 212 | `b7a917f` |
-| 2026-05-25 深夜 | 第二轮 review 5 项：cleanup 严格化 / FeedRow guard 时序 / APISettings 设 globalAIError / UsageRecording 契约统一 (success=false 强制 0) / AppDelegate syncInto 失败处理；测试 212 → 214 | `bb866b0` |
-| 2026-05-25 深夜 (二) | 第三轮 review 3 项：跨日 cleanup 一致 strict / scheduleTimer 拆出 configure / summary commit 漏走 helper 修复 | `bbb9234` |
-| 2026-05-25 深夜 (三) | 第四轮 review 4 项：auto path 并发→顺序（QPS 15→5）/ postUnreadCount 失败保留 badge / startupError 拆出与 globalAIError 隔离 / recommendCount 真正接入配置 | `496d4a6` |
-| 2026-05-25 深夜 (四) | 第五轮 review 4 项：onboarding 断点修复（applyCredentialChange）/ feed 禁用/删除后 badge 同步 / AddFeedSheet URL 去重 / ArticleSnapshot 旧 tolerant API 删除；测试 214 → 216 | `8761c22` |
-| 2026-05-25 深夜 (五) | 第六轮 review 5 项：APISettings 验后保存 / RSS+open 文章 scheme 校验 / AddFeed strict fetch 去重 + trim URL / applyCredentialChange 精确 reason 匹配 / AddFeed 成功触发 refresh；测试 216 → 219 (+RSS scheme +applyCredential 精确化拆 2) | `8866473` |
-| 2026-05-25 深夜 (六) | 第七轮 review 4 项：FilterPipeline 拆 transient vs classification（财报永久 reject 漏洞）/ Filter 后补 postUnreadCount / 检测可用性按钮不动 globalAIError / BuiltInFeeds 插入扫全表去重；测试 219 → 222 | `456aeeb` |
-| 2026-05-25 深夜 (七) | 第八轮 review 4 项：ArticleSnapshot 按 publishedAt 倒序排序 / 删源后清 per-cat digest+recommend 缓存 / saveAndCheck 失败不污染 globalAIError / parseRecommendResponse 改正则提取（支持 "1. 2. 3." 等格式）；测试 222 → 227 + 踩坑 #39 | `82889ae` |
-| 2026-05-25 深夜 (八) | **v2.0.1 发布**：8 轮 review 累计修复打包 release（含 P1 财报永久 reject 漏洞）；build.sh 加 BUILD_NUMBER 变量避免手动改 Info.plist 与脚本漂移 | `v2.0.1` |
-| 2026-05-26 早 | 第九轮 review 3 项：skipFilter 开启清旧 pending（FeedSettingsStore.persistSkipFilterChange）/ AddFeedSheet 统一 trim / parseRecommendResponse 末尾冒号优先；测试 227 → 232 | `9e5b81d` |
-| 2026-05-26 早 (二) | **第十轮 P1 schema migration 根因修复**：bump schemaVersion v2-multi-category-r2 / performSchemaMigrationIfNeeded throws 删 store 失败不推进 guard / 启动 sanity sweep + 踩坑 #40 | `3b9f7c2` |
-| 2026-05-26 早 (三) | 分发流程改 DMG + 朋友安装指南（build.sh hdiutil 打包 / README 4 步分步指南） | `2e5f71e` |
-| 2026-05-26 午 | 第十一轮 review 4 项：兜底 wipe 也写 schemaVersion (markSchemaMigrationComplete helper) / coverage gate 同时挡 recommend 与 digest / sanity sweep 扩到三 model / UsageRecorder 失败 rollback；测试 223 → 224 | `144e78b` |
-| 2026-05-26 下午 | 第十二轮 review 3 项：推荐候选改 snapshot.summarized（force path 一致兜底） / APISettingsView 统一 trim / APISettingsView checkStatus onChange 重置；测试 224 → 226 | `3f157aa` |
-| 2026-05-26 下午 (二) | **v2.0.2 发布**：第 9-12 轮 review 累计修复打包 release（含 P1 schemaVersion v2-multi-category-r2 强制 nuke + DMG 分发） | `v2.0.2` |
-| 2026-05-27 | 第十三轮 review 3 项：PreferencesService 持久化边界 trim（治历史脏数据）/ skipFilter 开启后立即 fire-and-forget refresh / 抽 URLNormalizer 替换裸字符串去重；测试 226 → 247 (+14 URLNormalizer +7 PreferencesService trim) | `5fdfac8` |
-| 2026-05-27 (二) | 第十四轮 review 2 项：抽 RefreshService.handleSkipFilterPendingFlipped helper 两个 FeedRow 共享 / BuiltInFeeds.syncInto + deduplicateArticles 统一 URLNormalizer；测试 247 → 250 | `861b96f` |
-| 2026-05-28 | 第十五轮 review 3 项：MenuBarView.onAppear 无条件 refreshIfNeeded 防跨日 stale / build.sh bump 2.0.2→2.0.3 / 修 BuiltInFeedsTests 假阳性 case；测试 250 持平（强化断言） | `6150107` |
-| 2026-05-29 | 第十六轮 review 3 项：refresh() 加 startupError 守护（UI 路径绕过 AppDelegate 保护）/ FeedsSettingsView 切 cat 清 checkResults / GeneralSettingsView toggle guard 兜底 reset；测试 250 → 252 | `0d3a3e7` |
-| 2026-05-29 (二) | 第十七轮 review 3 项：AddFeedSheet 捕获 FeedDraft 原子保存（验证后改 UI 不影响保存）/ FeedsSettingsView checkRunID 挡 in-flight 跨 cat 回写 / FeedRowView+BuiltInFeedRow skipFilter 重入 guard（与 isEnabled 同级）；测试 252 持平（纯 view 层） | `0d3a3e7` |
-| 2026-05-29 (三) | 第十八轮 review 1 项：FeedsSettingsView checkRunID → categoryGeneration（仅切 cat 递增，检测只捕获不递增）；修第十七轮引入的"同 cat 并发单检互相作废 / checkAll 中点单检丢弃批量结果"回归；测试持平（纯 view 层） | `7c05018` |
-| 2026-05-29 (四) | 第十八轮 review 第 2 项：FeedsSettingsView.summaryText 以 filteredFeeds id 集合做交集，只统计当前可见 feed 结果；治"同 cat 内删源/加源/检测中列表变化残留孤儿 id 被汇总继续统计"；测试持平（纯 view 层） | — |
-| 2026-05-29 (五) | 第十九轮 review 第 1 项：APISettingsView 保存按钮禁用条件对齐检测（`trimmedAPIKey.isEmpty \|\| effectiveModel.isEmpty \|\| isChecking`）；治"自定义模型为空按钮可点却静默无事 / 检测中再点并发触发"；测试持平（纯 view 层） | `c5e73fb` |
-| 2026-05-29 (六) | 第十九轮 review 第 2 项：AddFeedSheet + APISettingsView 异步校验加 request identity（generation 令牌）；治"用户请求期间改输入后旧请求仍回写 UI / 提交旧草稿 / 写旧 key+model 进 prefs"；测试持平（纯 view 层） | `18d2433` |
-| 2026-05-29 (七) | **Linus 系统性 review + 重构第 1 项**：RefreshService 注释精简（删 70+ 处"第X轮 review"历史考古注释，1103→1003 行；逻辑零变更，历史已在 git log + 本表保留）。结论：facade 1103 行肥肉 80% 是注释而非逻辑，去注释后 ~886 行内聚于"刷新编排"单一职责，强拆会增间接层故不拆。流程建议：review 准入门槛改为"能描述真实触发路径才改"，第 13 轮后多为理论竞态边际收益趋零；测试 252 持平 | `d6ec4e5` |
-| 2026-05-29 (八) | 第二十轮 review P2：hasNewArticles 语义修复（"可见新文章" vs "RSS 入库数"）；runFilterStage 返回 newlyAccepted，财报 cat 本轮新抓全被 filter reject 时不再白烧 recommend/digest token；TDD 加 2 测试（全 reject 不重生 + 部分 accept 仍重生），测试 252→254 | — |
-| 2026-05-29 (九) | **Linus 系统性 review 重构第 2-3 项**（2 commits）：① FeedRow/BuiltInFeedRow toggle 改自定义 Binding（set 里 mutate→persist，失败 rollback 自动回弹），删 4 处 isReverting guard + Task 兜底重入舞蹈；② RefreshService 删 2 处 v2 迁移残留（refreshIfNeeded() 无参 fallback + 全局 isSummarizing bool），activeSummaryPipelineCats 改 @Published private(set) 承接通知职责；测试 254 持平 | `0d3fe46` `34b9d7a` |
-| 2026-05-29 (十) | **新闻 tab 内容重构**（grill 7 轮收敛）：新闻源 8→7，聚焦实时/社会/国际去科技去娱乐。删 HN/The Verge/36氪（科技归 AI tab）；BBC 综合换分版块 World（去娱乐/体育）；补社会维度（新华网社会版官方直连 + 澎湃 RSSHub 镜像）。国内 4 / 国际 3 均衡，主官方直连。filterPrompt 仍 nil（源头干净不开 filter）。所有 URL curl 验证；总数 27→26；测试 254 持平（3 处计数断言更新） | — |
-| 2026-05-30 | **hover 崩溃根治 + 推荐 ↔ 文章互斥折叠 + 摘要 2 行常显**（grill 4 轮收敛）：① hover 切 lineLimit 让 row 内在尺寸变化触发 MenuBarExtra(.window) popover NSWindow 重算 → `_postWindowNeedsUpdateConstraints` 抛 NSException 必崩（踩坑 #41）。删 hover 状态，summary 永久 `lineLimit(2) + fixedSize(vertical:true)`。② RecommendItem 色条改 row overlay（替代 HStack child）— summary fixedSize 后 HStack layout 协商把色条 `frame(maxHeight: .infinity)` 当上限不强制撑满 → row 间 padding 区透明视觉不连续。overlay 自动 fill receiver 完整 frame 含 padding 区。③ 新增 `ExpandedSection` enum 单字段共享状态 .recommend/.article，两 section 受控 @Binding，cat 切换 onChange 显式 reset，popover 重开 @State 自然 reset。④ 空间预算：ArticleList rowHeight 80→95（适配摘要 2 行）、listHeight 上限 260→480（互斥折叠让 recommend 折叠时让出 ~400pt 给 article 可见 ~5 行）、MenuBarView `.frame(maxHeight: 1000, alignment: .top)` 兜底防外接小屏溢出；测试 254 持平 | `5f4c9c7` |
-| 2026-05-30 (二) | **v2.0.6 发布**：本会话累计改动打包 release（hover 崩溃修复 + 互斥折叠 + 摘要 2 行常显） | `v2.0.6` |
-| 2026-06-02 | **摘要超 2 行 hover 弹 tooltip 看全文**：RecommendItemView + ArticleRowView summary 各 +1 行 `.help(summary)`，hover 约 1 秒弹原生系统 tooltip 显示完整摘要。与踩坑 #41 本质区别——tooltip 是系统级独立窗口，不改 row 内在尺寸/不触发 popover NSWindow 重算，故安全（#41 禁忌只针对"hover 改 row 自身尺寸"）。grill 2 问收敛：hover 触发 + 先 tooltip 验证再按需升级自定义 popover；测试 254 持平（纯 view 层） | — |
-| 2026-06-12 | **Linus 系统性 review 5 项修复**（grill，本轮会话）：① C1: API Key Base64 编码防 `strings` 扫描 + 旧版明文自动迁移 ② C2: RefreshService 拆三文件（619 行编排 + 112 行 RSS + 319 行 AI），消除 God-object ③ H1: SummaryPipeline.Task 删 `= .ai` default（与 L1 方向一致但漏网）④ H2: 抽 `PipelineConcurrency` helper 消除 SummaryPipeline / FilterPipeline 有界并发循环复制粘贴（125→102 / 160→140）⑤ H3: 抽 `FeedRowComponents`（`FeedRowCheckButton` + `FeedRowSkipFilterToggle`）消除 FeedRowView / BuiltInFeedRowView 共享 UI 复制粘贴（209→105 行合一文件）；测试 254 持平 | — |
+| 日期 | 里程碑 |
+|---|---|
+| ~2026-05-20 | **v1 全功能完成**（单 AI tab）：Pipeline/Engine 拆分、ModelContext+Safe 双轨错误处理、UsageInfo 三方法返回、DesignTokens（Typography 8 / TextColor 5 / BrandColor 3）、每日 Token 用量统计 |
+| 2026-05-25 | **v2 多分类重构**：3 tab（AI/财报/新闻）、Schema v2 + Migration 全清、FilterPipeline、RefreshService dict 化（`states: [Category: CategoryState]`）、26 内置源、CategoryTabBar。8 轮 Linus review（含 P1 财报永久 reject 数据丢失漏洞）|
+| 2026-05-25 | **v2.0.1 发布**：8 轮 review 累计修复打包 |
+| 2026-05-26 | **v2.0.2 发布**：schemaVersion bump `v2-multi-category-r2` 强制 nuke（P1 根因，踩坑 #40）+ 分发改 DMG |
+| 2026-05-29 (十) | 新闻 tab 内容重构：源 8→7，聚焦实时/社会/国际，去科技去娱乐 |
+| 2026-05-30 | **v2.0.6 发布**：hover 崩溃根治（踩坑 #41）+ 推荐 ↔ 文章列表互斥折叠 + 摘要 2 行常显 |
+| 2026-06-02 | 摘要超 2 行 hover `.help()` tooltip 看全文（系统级独立窗口，不触发 #41） |
+| 2026-06-12 | **Linus 系统性 review 5 项**：C1 API Key Base64 编码防 `strings` 扫描 + 旧版明文自动迁移 / C2 RefreshService 拆三文件消 God-object / H1 SummaryPipeline.Task 删 `.ai` default / H2 抽 `PipelineConcurrency` 消除两 Pipeline 复制粘贴 / H3 抽 `FeedRowComponents` 消除两 FeedRow UI 复制粘贴 |
 
-具体决策见下方设计决策表；具体踩坑见后段；增量段历史详情已沉淀到 git log。
-
-### 2026-05-25 晚 review 全清单（速查）
-
-| 等级 | 项 | 核心修复 |
-|---|---|---|
-| 🔴 C1 | 跨日 reset dead code | 11 行 if/else → `lastResetCheckDate != nil` |
-| 🟠 H1 | 12 个 .ai shortcut 蔓延 | 全删；states `private(set)`；公开 `markAvailability(_:for:)` + DEBUG `_testMutate` |
-| 🟠 H2 | commitSummaries 内存回滚舞蹈 | 改用 `context.rollback()` |
-| 🟠 H3 | runRefresh 漏写 fetchError | defer + captured value 保证写入 |
-| 🟠 H4 | 401/403 一锅炖 | 新增 `.forbidden`，UI 文案区分 |
-| 🟠 H5 | 三 cat 串行刷新 | `refreshAllCatsConcurrently` 用 TaskGroup，冷启动 1-2 分钟 → ~30s |
-| 🟠 H6 | states setter internal | 已并入 H1 |
-| 🟡 M1 | filter 失败状态机散三处 | `Article.recordFilterFailure(maxBeforeReject:)` extension |
-| 🟡 M2 | syncInto 删→改顺序坑 | 先改 feed.category 再用 feedID 删 articles |
-| 🟡 M3 | currentCredentials 名实不符 | CQS 拆 `currentCredentials()` + `ensureCredentials(cat:)` |
-| 🟡 M4 | mutate 递归隐患 | 注释禁止递归（防御性） |
-| 🟡 M5 | Schema migration `try?` 静默 | do/catch + 区分 `fileNoSuchFile` + Log |
-| 🟢 L1 | prompt 函数 `.ai` 默认 | 删 default，测试显式传 |
-| 🟢 L2 | `Article.accepted = true` 默认 | 改 `nil`，"通过"成显式行为 |
-| 🟢 L3 | `Category.from` 静默 fallback | Log 非 nil 解析失败 |
-
-**意外副带 bug**：APISettingsView.checkConnection 成功路径原只 set `.ai` cat availability，财报/新闻留 .unknown；改为只清 globalAIError。
+> 逐轮 review 细节、commit hash、各轮测试数变化见 `git log`，不在此重复。架构决策见下表，踩坑见末段。
 
 ---
 
 ## 设计决策记录
+
+只记长期有效的架构原则（"指导未来改动"），一次性 bug 修复见踩坑记录 + git log。
 
 | 维度 | 决策 | 理由 |
 |------|------|------|
 | 应用类型 | macOS 菜单栏（MenuBarExtra） | RSS 需后台刷新，WidgetKit 刷新策略不适合 |
 | 技术栈 | Swift + SwiftUI + macOS 14+ | 原生体验，MenuBarExtra 成熟，SwiftData 集成顺畅 |
 | 数据来源 | 内置精选源 + 用户自定义 RSS | 开箱即用 + 灵活扩展 |
-| UI 布局 | 文章列表 → AI 推荐 → 今日摘要 | 操作项优先，静态阅读内容置后 |
-| 刷新策略 | 后台每小时 + 打开时按需（超 30 分钟触发） | 兼顾实时性和资源效率 |
-| 已读状态 | 两个独立 @Query（未读在前 + 已读在后），标题色区分 | List Section header 有系统背景色问题，改用普通行充当分隔 |
-| 文章点击 | 浏览器打开原文 + AI 一句话简介 | 符合用户预期 |
-| AI 摘要服务 | 阿里云百炼 DashScope，模型可配置（默认 qwen3.6-plus） | 原设计 qwen-plus，升级为新模型列表；支持千问/智谱/Kimi/MiniMax |
-| 密钥存储 | UserDefaults（`com.ainewsbar.claude-api-key` / `com.ainewsbar.model`） | ad-hoc 签名避免弹授权窗口；服务原名 KeychainService，已重命名为 PreferencesService 反映实际实现 |
-| 数据持久化 | SwiftData（Feed / Article）+ UserDefaults（日报内容/生成时间/摘要数量） | 日报跨重启保留，次日自动失效；摘要数量用于 Plan A 增量判断 |
-| 分发方式 | 仅自用，ad-hoc 签名 | 无需公证和 App Store 审核 |
-| RSS 抓取并发 | TaskGroup 全并发（11 个 feed 同时抓） | 各 feed 互相独立，无需限速 |
-| AI 摘要并发 | TaskGroup 最多 5 并发 | 避免触发 DashScope QPS 限制；串行改并发显著缩短刷新时间 |
-| AI 生成触发策略 | 80% 完成度阈值 + Plan A delta≥3 补触发 | 避免部分失败时生成低质内容，同时保证补齐后能重新生成 |
-| 手动刷新 | 推荐/摘要各有独立刷新按钮，绕过所有自动触发条件 | 用户主动操作意图明确 |
-| 服务架构 | 外观 (RefreshService) + SummaryPipeline + RecommendEngine + DigestEngine + ArticleSnapshot + FilterPipeline (v2) | Engine 纯业务可独立单测；外观集中编排 + 原子 commit |
-| 视图组织 | `Views/MenuBar/` + `Views/Settings/` 子目录；EnvironmentObject 注入 RefreshService | 单文件 <200 行；singleton 散布点 12+ → 1 处（AINewsBarApp） |
-| 错误处理 | `ModelContext+Safe` 双轨 API：`safeFetch/safeSave`（失败容忍）+ `safeFetchOrThrow/safeSaveOrThrow`（严格抛出，关键路径） | 替代散落 25+ 处 `try?` 吞错；caller 显式区分"真的无数据"与"fetch 失败" |
-| AI DI | `AISummarizing` 方法签名带 `model: String` 显式参数；BailianService 不读 prefs | 解除 `PreferencesService.shared.getModel()` 单例后门，测试可完全 mock |
-| Token 用量存储 | 明细级 `UsageRecord` @Model（id/timestamp/scene/model/in+out tokens/success/category v2） | 数据量可控（30 天 ≤ 400 条），查询灵活 |
-| Token 用量 scene | 4 业务场景 summary/recommend/digest/**filter** (v2)；testConnection 不入库 | 干净的堆叠柱图；test 量极小不污染 |
-| Token 用量 UI | Settings "用量" Tab（今日卡片 + 7/30 天 Charts 堆叠柱图）+ Footer "· 今日 X tokens" | 菜单栏不拥挤；K/M 格式化 |
-| Token 失败语义 | 失败入库 tokens=0 + success=false；趋势图 filter success | "AI 服务质量"信号；趋势按 token 求和不被失败污染 |
-| Token 写入路径 | `AISummarizing` 三方法返回 `(value, UsageInfo)`；Pipeline/Engine 传 usage 给 RefreshService 集中 `record(...)` | BailianService 保持纯 HTTP 不耦合 UsageRecording |
-| Startup 启动逻辑 | 全部在 `AppDelegate.applicationDidFinishLaunching`（container / UsageRecorder / configure / feed sync / postUnreadCount / launchBackgroundRefreshIfNeeded / NSWorkspace.didWakeNotification） | 避免依赖 `MenuBarView.task`（popover lazy view，用户点击前不触发，踩坑 #13）|
-| 跨日重置 | `resetCrossedDayStateIfNeeded()` 在 timer 与 refreshIfNeeded 双调用；清 SwiftData + @Published + prefs 三层 | `@Published` 状态在跨日时从未自动失效，仅清 prefs 无法让 UI 立即切换（#19）|
-| 跨日 guard 字段 | `lastResetCheckDate: Date?` 与 `lastRefreshDate` 解耦 | 旧实现复用 lastRefreshDate 被 refresh() 末尾抹掉跨日信号（#21）|
-| 相对时间显示 | 自定义 `formatArticleRelative(_:now:calendar:)` 纯函数 | SwiftUI 内置 `.relative` 无方向（"3 hours" 而非"3 小时前"）+ tick 更新（#18）|
-| 推荐项未读指示 | 左侧 3pt 贯穿橙色色条 + Index 联动 + 标题联动（三重，不加整行底色） | 单一信号在 12pt + quaternary 背景下不够明显；色条用 Mail.app leading-bar 范式 |
-| force/auto 并发互斥 | `refreshTask: Task<Void, Never>?` inflight 复用，所有入口 `await existing.value` | 避免双发 AI/双 commit/双扣 token；用户体感最多等几秒可接受（#25）|
-| Pipeline 取消语义 | `.cancelled` 状态独立于 `.failure`，不计 failed 不记 UsageRecord | 取消不是 AI 失败，不应污染 aiAvailability；Task.isCancelled 多点 checkpoint（#26）|
-| 启动数据库容灾 | 二次构造失败 in-memory ModelConfiguration fallback，三次失败 fatalError | 个人工具优先可用性：用户至少能看到菜单栏，下次启动若磁盘恢复自动重试持久化 |
-| 测试 Timer 清理 | RefreshService 暴露 `stop()`；测试 tearDown 显式调用 | Swift 5.9 不支持 `@MainActor isolated deinit`（#30）|
-| Typography 体系 | relative font 8 档 | 跟随系统 Dynamic Type；ArticleRow 标题 fixed `Font.system(size:13)` 为 listHeight 写死的 a11y trade-off |
-| Color token | TextColor 5 档（含 `secondaryWeak = .primary.opacity(0.40)` feed 来源名专用）+ BrandColor accent/accentSoft/surfaceMuted | tertiary 走 `Color(nsColor: .tertiaryLabelColor)` 桥接；BrandColor 用 `NSColor.dynamicProvider` + 原生 sRGB 避免桥接损失 |
-| 区域背景 | `BrandColor.surfaceMuted` (6% Color.primary) 替换 `.quaternary` | 浅色三块叠加观感过重；6% 是肉眼可辨 + 不压迫的平衡点 |
-| 文章行未读指示 | 4pt orange leading dot（不加行底色） | 与推荐区色条形成差异化方案，dot 与色条同用 BrandColor.accent 视觉协调 |
-| AI banner 双值 opacity | accentSoft 浅 0.08 / 深 0.20 | 深色下 8% 几乎不可见 |
-| AI 输出净化 | `MarkdownStripper.strip` 在 DigestEngine.run + SummaryPipeline.runOne 双点接入；prompt 端追加纯文本约束 | 单 prompt 不可靠（temperature > 0）；单 strip 易出结构错乱；两手都要硬，处理范围保守（保留 `- * +` 列表层次） |
-| DigestSection 折叠策略 | 默认 `isExpanded=true` 全展开 + 点击可折叠 | 摘要本就是"一眼看完"；旧 lineLimit(5) + AI 偶发 6-7 行双 bug 互相强化 |
-| Category 维度落位（v2）| Feed/Article/UsageRecord 加 `category: String` 冗余字段；Feed:Category 1:1；3 cat 硬编码 enum；CategoryConfig 持有 per-cat filterPrompt + recommendCount | SwiftData @Query 不支持 join，冗余 1 字段换 O(1) 过滤；3 cat 是产品决策不是数据 |
-| Filter Stage 落位 | 入库后标 `accepted: Bool?`（nil/true/false）；财报 cat 必备其他 cat 可选；失败 3 次永久 reject | 入库前 filter 会每次抓 RSS 重判同一篇 reject 反复花 token；保留原始数据让 prompt 迭代时能 review |
-| 协议双轨策略 | v2 阶段 PreferencesStoring / AISummarizing / UsageRecording 改协议加 cat 时保留旧无 cat fallback；**2026-05-25 (27ff4a6) 全删过渡 fallback** | 过渡期降低 phase 间耦合；过渡结束必须删，否则新增 cat 时 caller "默认落 .ai" 静默漏改 |
-| RefreshService dict 化（v2 → review 后）| `@Published private(set) var states: [Category: CategoryState]`（H1 删 12 .ai shortcut + 收紧 private(set)）；公开 `markAvailability(_:for:)`；DEBUG `_testMutate`；per-cat `refreshTasks` inflight；`refreshAllCatsConcurrently`（H5）；首启 firstLaunchAfterSchemaUpgrade 仅触发 AI cat | shortcut 是过渡期遗留会让 caller 图省事丢失 per-cat 状态；并发 QPS 3×5=15 对 30 安全，冷启动 1-2 分钟 → ~30s |
-| Migration 全清策略（v2）| schemaVersion="v2-multi-category" 不匹配则 nuke 旧 store + 白名单清 `com.ainewsbar.*` 业务 key（保留 API Key + Model + launchAtLogin）+ 标 firstLaunchAfterSchemaUpgrade。**review 后 (M5)** 删 sidecar 由 `try?` 改 do/catch + 区分 `fileNoSuchFile` + Log | 接受历史数据全清；白名单为保 launchAtLogin；静默删除失败会让用户数据隐性丢失 → 必须可观测 |
-| CategoryTabBar 实现（v2）| HStack 3 Button 等宽替代 Picker.segmented；选中态 `unemphasizedSelectedContentBackgroundColor` + 0.5pt border + shadow + semibold | macOS Picker.segmented 按内容宽度无法等分撑满（#35）；native segmented selected 色保证明暗双适配 |
-| 跨日重置 guard 简化（review 后）| shouldClearState 从 11 行 if/else 简化为 `lastResetCheckDate != nil` | guard 已排除今日 + loadPersistedState 已清非今日，原 else 分支永远 false |
-| 摘要保存失败回滚（review 后）| `commitSummaries` 失败用 `context.rollback()` 替代旧手动 fetch+nil+save 舞蹈 | 手动舞蹈第二次 save 失败时内存与磁盘永久错位 |
-| AI 错误分级映射（review 后）| `GlobalAIError` 新增 `.forbidden` 与 `.invalidAPIKey` 分离：401→invalidAPIKey / 403→forbidden / 429→quotaExceeded / 5xx→other / 网络→networkUnreachable | DashScope 403 常见是模型未授权，一锅炖让用户怀疑代码 bug |
-| credentials 查询 CQS（review 后）| `currentCredentials()` 纯查询 + `ensureCredentials(cat:)` 显式 command | 旧 `currentCredentials(cat:)` 名似 query 实是 command（设 globalAIError + per-cat unavailable）|
-| Article filter 失败状态机（review 后）| 收敛到 `Article.recordFilterFailure(maxBeforeReject:)` extension | 旧 7 行 if/else 散在 RefreshService.runFilterStage；状态机归属 model 自身 |
-| Article.accepted 默认 nil（review 后）| init default 从 `true` 改 `nil`：未跑 filter 应为 nil；要跳过 filter 须显式传 `accepted: true` | 旧 default 与设计意图相悖，新建路径漏传时财报噪声泄漏到 UI |
-| Category.from fallback 可观测（review 后）| 解析失败 fallback `.ai` 前 Log；nil 不报（合法首启路径） | 脏数据静默打到 AI tab 污染推荐/日报 |
-| cleanupOldArticles 一致 strict（bb866b0 + bbb9234）| per-cat 与全 cat 两版 cleanupOldArticles 都改 throw；runRefresh / resetCrossedDayStateIfNeeded 失败 rollback + return + 不推进 lastResetCheckDate | tolerant cleanup 失败被当空结果继续推进 → 留 pending delete 或推进 guard 当天不再重试 |
-| Timer 启动与 sync 成功解耦（bbb9234）| configure() 只注入依赖；scheduleTimer 移到 launchBackgroundRefreshIfNeeded 内部（!configured 守护）。AppDelegate sync 成功才调 launch... | sync 失败时旧路径 timer 仍 hourly 触发 → 0 文章 + lastRefreshDate 更新 → UI 显示"刚刚更新但永远是空" |
-| UsageRecording 契约：失败 ⇒ tokens=0（bb866b0）| helper `record(info:success:)` 在 success=false 时强制 input/output=0；caller 仍传真实 UsageInfo 由 helper 自动丢；协议文档明确"成功生效的用量"语义 | 旧契约自相矛盾（协议说失败=0 但 helper 透传 token）；与"今日用量按 success 过滤"UI 语义对齐；caller 不用每处自己归零 |
-| FeedRow toggle 改自定义 Binding（2026-05-29 (九)）| `Toggle($feed.*)` → `Toggle(Binding(get:set:))`：set 里先 mutate model → persist，成功落库；失败 `context.rollback()` 连带撤销 pending 改动，SwiftUI 重渲染时 get 读回旧值自动回弹。4 处 isReverting guard + Task 兜底全删 | 根因是用双向绑定做"需要校验、会失败、有副作用"的写入：Toggle 一改就已 mutate model，只能事后回写并防回写触发的 onChange 重入。Binding set 把校验前移到"提交前"，失败什么都不必撤销以外的状态已经没有 |
-| FeedRowView toggle guard 确定性时序（bb866b0，已被上条取代）| ~~catch 顺序：先 arm guard → rollback + 改 oldValue → Task 兜底 reset~~ | 历史方案，现改 Binding set 从根本消灭需求 |
-| APISettings 失败设 globalAIError（bb866b0）| checkConnection catch 调 `GlobalAIError.from(error) ?? .other(localizedDescription)` 设 refreshService.globalAIError | 旧路径只更新行内 checkStatus，菜单 UI 仍显示旧可用状态直到下轮 refresh，违背"用户在设置页看到失败时主 UI 也应同步"语义 |
-| AppDelegate syncInto 失败可见（bb866b0）| 检查 Bool 返回；失败 set globalAIError + skip launchBackgroundRefreshIfNeeded | 旧实现忽略返回值；feed 表可能空但 refresh 仍跑 → 0 文章 + lastRefreshDate 更新 |
-| Auto path 并发→顺序（第四轮 review）| `refreshAllCatsConcurrently` → `refreshAllCatsSequentially`，timer/wake/launch 三入口顺序 await `refreshIfNeeded(_:)`；手动单 cat / force* 不变 | 旧 3×5=15 峰值靠 "DashScope 30 QPS" provider 不变量保护，限速调整 / key 多端共享一旦发生整次刷新失败；后台路径优先可靠性，峰值降到 5，最坏冷启动 ~1-2 分钟可接受 |
-| postUnreadCount 失败保留 badge（第四轮 review）| `safeFetch` → `safeFetchOrThrow` + do/catch；失败仅 Log 不广播通知 | badge 是用户可见状态，错发 count=0 会让用户以为"全读完了"；保留上一次值是最安全的失败行为 |
-| startupError 与 globalAIError 隔离（第四轮 review）| 新增 `@Published var startupError: String?`；AppDelegate syncInto 失败写 startupError 而非 globalAIError；MenuBarView banner 优先级 startup > global > per-cat | 复用 globalAIError 会被任意 AI 成功 `clearGlobalAIErrorAfterAISuccess` 静默清除；启动错误根因仍在却消失，且 UI 文案"AI 不可用"误导用户怀疑代码 bug |
-| recommendCount 真正接入（第四轮 review）| BailianService.recommendArticles/makeRecommendPrompt/parseRecommendResponse + RecommendEngine 阈值 + RecommendSectionView 全部从 `CategoryConfig.for(cat).recommendCount` 取；协议加 `count: Int` 显式参数 | 旧 3 个硬编码 5 让 CategoryConfig.recommendCount 成"会撒谎的配置"；未来调单 cat 数（如新闻 3 条）只改一处即可 |
-| Onboarding 断点修复（第五轮 review）| RefreshService 新增 `applyCredentialChange()`：清 globalAIError + 重置 credential 相关 per-cat unavailable → .unknown + 顺序 await refresh 三 cat。APISettings.checkConnection 成功 fire-and-forget 调用 | 旧路径：无 key 首启 runRefresh 跑到 AI 段才退出 → lastRefreshDate 已 set；用户保存 key 后 refreshIfNeeded 因 stale 阈值跳过、tab lazy load 因 lastRefreshDate 非 nil 不触发 → AI tab 摘要/推荐空白要等 30 分钟或手动刷新 |
-| Feed 禁用/删除后 badge 同步（第五轮 review）| FeedRowView.handleToggle 成功路径 + FeedsSettingsView.deleteCustomFeeds 成功路径调 `refreshService.postUnreadCount(context:)` | 主列表靠 @Query 自动更新；菜单栏 badge 只靠 NotificationCenter，不主动 post 会 stale 直到下次 refresh/打开菜单 |
-| AddFeedSheet URL 去重（第五轮 review）| 静态 `normalize(_:)` 小写+去尾斜杠；insert 前 fetch 全量 Feed 比对，重复弹 alert 拒绝 | 旧路径无 URL 去重，同 URL 重复 feed 会重复抓 RSS / 重复显示 / 失败统计噪声；article URL 去重只能救文章层不能救 feed 层 |
-| ArticleSnapshot tolerant API 删除（第五轮 review）| 删 `capture(from:)` 与 `capture(from:category:)`（safeFetch 静默空快照），仅留 `captureOrThrow` | 生产路径已全部迁到 captureOrThrow；留着 tolerant 版本只会让后人在"DB 查询失败"和"无文章"间挖坑（踩坑 #22 同型陷阱） |
-| APISettings 验后保存（第六轮 review）| saveAndCheck 先 testConnection 局部 apiKey/model，成功才 saveAPIKey/saveModel；失败时 prefs 完全不动 | 旧路径先持久化再检测；用户手滑输错就覆盖上一套可用配置，主流程开始用坏配置 |
-| RSS+open 文章 scheme 校验（第六轮 review）| RSSService.fetchRawArticles 与 MenuBarView.openArticle 都 guard `scheme == "http" || "https"`；拒绝 file://、javascript:、shell: | RSS 是外部输入；NSWorkspace.open 不应被诱导打开任意 scheme |
-| applyCredentialChange 精确 reason 匹配（第六轮 review）| 静态常量 `RefreshService.missingCredentialReason = "未配置 API Key"`；ensureCredentials set 该 reason，applyCredentialChange 精确比对，**只清** credential 那一条 | 第五轮注释说"non-credential 不清"但实现 set all .unavailable→.unknown；会掩盖"摘要调用多数失败/摘要保存失败"等真业务错误 |
-| AddFeed strict fetch + trim + 触发 refresh（第六轮 review）| 重复检测改 `try modelContext.fetch` strict，失败弹 alert；URL/title 存盘前 trim 空白；保存成功后 fire-and-forget `service.refresh(selectedCategory)` | 旧 `try? ... ?? []` 是 false-empty 写路径；空白字符进库；添加后若该 tab 刚刷新过 lastRefreshDate 挡住 lazy refresh 让用户体感"加了没用" |
-| FilterPipeline 拆 transient vs classification（第七轮 P1）| `Result` 新增 `classificationFailedIds` / `transientFailedIds` / `firstTransientGlobalError`。只有 `BailianError.malformedResponse` 计 classificationFailed→ recordFilterFailure；其他错误（HTTP 401/403/429/5xx、网络、未知）算 transient，保持 accepted=nil 下轮重试 + 设 globalAIError 提示用户 | 旧实现 `.failed(id)` 一锅炖，网络抖动/401/429 都累计 filterFailCount 3 次后永久 reject 财报文章；这是个真实数据丢失漏洞 |
-| Filter 持久化后补 postUnreadCount（第七轮 P2）| runFilterStage `persistSucceeded && !writeIds.isEmpty` 时调 `postUnreadCount(context:)` | 财报文章 accepted=nil 时不计入 badge；filter 通过后 accepted=true，badge 应该立即更新；menu bar label 只听通知不补就 stale 到下次 refresh / 菜单打开 |
-| 检测可用性按钮不动 globalAIError（第七轮 P3）| `checkConnection()` 完全删 set/clear globalAIError；只更新本页 checkStatus；`saveAndCheck` 仍维持成功 set/失败 set globalAIError（持久化路径） | 检测候选 ≠ 主流程持久化值；旧实现成功清/失败设 globalAIError 让候选好 key 误清主 UI 错误，或候选坏 key 误显示全局错误 |
-| BuiltInFeeds 插入扫全表去重（第七轮 P3）| 新增源插入前从 `context.fetch(FetchDescriptor<Feed>())` 扫全表（含 custom）比对 URL；删除/元数据同步仍只动 built-in | 旧实现只扫 built-in，如果某 URL 被加入 built-in 时用户已有同 URL custom 源，会插入重复 feed；重复 fetch + 重复显示 + 失败统计噪声 |
-| ArticleSnapshot 内存 sort by publishedAt（第八轮 P2）| `captureOrThrow` fetch 后 `articles.sorted { $0.publishedAt > $1.publishedAt }`；不用 `FetchDescriptor.sortBy` 避开 SwiftData 边界 SIGTRAP | 旧实现不带 sort 让 prompt prefix(50) / prefix(20) 切到的不一定是最新文章；AI 推荐/日报内容依赖 SwiftData 默认返回顺序 + RSS 并发完成顺序 |
-| 删源后清 per-cat digest+recommend 缓存（第八轮 P2）| RefreshService 新增 `invalidatePerCatCache(for:)` 公开方法；FeedRowView.handleToggle / FeedsSettingsView.deleteCustomFeeds 成功路径调用 | 旧路径删源后只更 badge；digest 文本可能含已删源标题；recommendedArticleIDs 非空让 auto refresh 不重生（陈旧永留） |
-| saveAndCheck 失败不污染 globalAIError（第八轮 P3）| `saveAndCheck` 失败 catch 删 `globalAIError = ...` 这一行；只更新本页 checkStatus | 持久化失败时 prefs 未变，主 UI 反映的应该是"当前持久化配置"，不该被未保存候选输入污染 |
-| parseRecommendResponse 改正则提取（第八轮 P3）| 旧 `components(separatedBy:)` 改 `NSRegularExpression("\d+")` 匹配所有数字串；空 prompt cap 用 `count > 0 && totalCount > 0` guard | 旧实现遇 "1. 2. 3."/"[1] [2]"/"推荐：1,3,7" 等模型啰嗦输出会 split 后整数解析失败返空；正则提取数字鲁棒得多 |
-| skipFilter 开启清旧 pending（第九轮 P2）| `FeedSettingsStore.persistSkipFilterChange` 开启时 fetch `feedID==X && accepted==nil` flip 为 true；caller 据返回 count 调 postUnreadCount + invalidatePerCatCache；关闭不反向重筛 | 旧路径 toggle 只存 feed.skipFilter；旧 pending 仍 accepted=nil → @Query 隐藏 + FilterPipeline 仍抓出来烧 token，违反"纯净源"语义 |
-| AddFeedSheet 统一 trim（第九轮 P3）| 顶层 trimmedURL/trimmedTitle computed property；disabled gate / validateAndAdd fetch / 去重比对 / 存盘四路径全部用 trimmed 值 | 旧路径空判用原值、validate 用原值、save 才 trim → "   " 标题能通过，"校验失败但仍要添加"路径强制存 trim(X) 与校验路径不一致 |
-| parseRecommendResponse 末尾冒号优先（第九轮 P3）| 优先取最后 `:` / `：` 后段 extractRecommendIds，空再 fallback 全文；保留无冒号格式兼容 | 旧全文正则吞解释里数字（"推荐**5**篇：1,2,3,4,5" → [5,1,2,3,4] 顺序错乱）；末尾冒号是"解释:结果"模式的稳定分隔 |
-| **schemaVersion bump → v2-multi-category-r2（第十轮 P1 根因）**| `currentSchemaVersion` 升 r2 强制所有 v2 早期机器再 nuke 一次；规范"任何 v2 内部 schema 演进（含字段 init 默认值变更）都必须 bump r3/r4..." | v2 phase 1 后期 Article.accepted true→nil 等内部演进 schemaVersion 字符串没动 → 跑过 v2 早期版本的机器 guard 跳过 nuke → SwiftData 自动加列 NULL → fetch 时 mandatory field 校验失败（21 行 Article.category=NULL 报错）|
-| performSchemaMigrationIfNeeded throws（第十轮 P1 同型踩坑 #28）| `wipeStoreFiles()` 抽出独立 throws；migration func 改 throws，删 store 失败不推进 schemaVersion 写入；caller makeContainer catch 后下次启动重试 | 旧 catch 只 Log 不 throw → 删 store 失败仍写 schemaVersion → 下次启动 guard 通过，旧库残留持续静默存在 |
-| 启动 sanity sweep（第十轮 P2）| makeContainer 构造成功后 `sanityCheckArticles` fetch 1 条 Article 触发 SwiftData mandatory-field 校验；失败走 wipeStoreFiles 兜底 + 标 firstLaunchAfterSchemaUpgrade | schemaVersion guard 仅检测"主动 schema 变更"，对"SwiftData 自动迁移加列 NULL 让旧行存活"无能为力；sanity sweep 是最后一道防线 |
-| 分发改 DMG + 朋友安装指南（2026-05-26）| build.sh 删 zip 输出改 `hdiutil create -fs HFS+ -format UDZO` 打 DMG；DMG 内 .app + Applications 软链。README 加分步图文：右键打开 → macOS 15 走系统设置→隐私与安全性→"仍要打开"按钮 → fallback `xattr -dr com.apple.quarantine` | zip 解压双击触发 Gatekeeper "已损坏"；ad-hoc 签名 + GitHub 下载附加 `com.apple.quarantine` xattr 必然被拒。无 $99/年 Developer ID 时这是性价比最高的方案；DMG 视觉像"正经安装包"且 macOS Sequoia 的"仍要打开"按钮已成稳定路径 |
-| markSchemaMigrationComplete helper（第十一轮 P2）| 抽出"清业务 prefs + 写 schemaVersion + 写 firstLaunch flag" helper；performSchemaMigrationIfNeeded 主路径与 makeContainer 兜底 wipe 成功后都调用 | 旧兜底路径只 set firstLaunchAfterSchemaUpgrade 不写 schemaVersion → 下次启动 guard 仍判 mismatch 又触发一次清库；也不清业务 prefs → 空库 + 旧 prefs 显示"已生成日报"指向已删文章。两路径必须等价 |
-| coverage gate 同时挡 recommend（第十一轮 P2）| 旧 `if !coverage` 只挡 digest；改为 recommend 块也独立 `if !coverage` skip。RecommendEngine 用 snapshot.all 不过滤 summary，coverage 不足意味 snapshot 含 nil-summary 文章 | 产品规则"摘要质量不足就不要生成派生内容"应同时覆盖推荐与日报；5 篇文章只成功 3 篇时旧路径仍跑推荐，候选列表混 nil 摘要让 AI 选不出有信息量的推荐 |
-| sanity sweep 扩到三 model（第十一轮 P3）| sanityCheckSchema 对 Article / Feed / UsageRecord 各做一次 fetchLimit=1，任一失败走兜底重建路径 | 旧只 fetch Article 漏检 Feed / UsageRecord；Feed.category 坏掉时 Article sweep 通过，BuiltInFeeds.syncInto 才业务路径失败 → banner + 不自动刷新，而非自动重建。坏库全清策略要求 sweep 覆盖全 schema |
-| UsageRecorder 失败 rollback（第十一轮 P3）| record() 与 cleanupOlderThan() 中 safeSave 失败时 `context.rollback()`；非关键路径失败可丢弃，但不能让脏 insert/delete 留在 ModelContext 里被后续业务 save 一起落盘 | telemetry 是非关键路径采用 tolerant safeSave，但旧实现失败后不清 pending changes；后续 commitSummaries / postUnreadCount 等业务路径 save 时会把本该丢弃的 telemetry 落盘，污染"今日 token 用量" UI |
-| RecommendEngine candidates = snapshot.summarized（第十二轮 P2）| 阈值与喂给 AI 的 items 统一从 `snapshot.summarized` 取；UI RecommendSectionView 候选不足文案按 `articles.filter { aiSummary != nil }.count` 显示 | 旧 `snapshot.all` 让 force 路径绕过 coverage gate：5 篇文章 3 篇有摘要时用户点"刷新推荐"仍烧 token 推 nil-summary 候选。新设计 candidates 同源所有 caller（auto / force / 手动）自动有保护，UI 与 Engine 用同一阈值不漂移 |
-| APISettingsView 统一 trim（第十二轮 P3）| `trimmedAPIKey` / `trimmedCustomModel` / `effectiveModel` computed 包 trim；disabled gate / saveAndCheck / checkConnection / prefs 写入全部走 trimmed 值 | 用户从网页/聊天复制 API key 常带尾部空白/换行 → 旧实现 testConnection 凭原值 HTTP 401（"Authorization: Bearer sk-...\n"），保存路径也把脏值写进 UserDefaults 污染主流程 |
-| APISettingsView checkStatus onChange 重置（第十二轮 P3）| `.onChange(of: apiKey/customModel/selectedModel)` 重置 `checkStatus = .idle`；useCustomModel toggle 已有同样行为 | 检测成功后用户改输入 UI 仍显示"API Key 和模型均可用"误导用户；状态必须与当前 form 输入同步 |
-| PreferencesService 持久化边界 trim（第十三轮 P2）| `saveAPIKey/saveModel` 写入 trim + `getAPIKey/getModel` 读取也 trim 兜底治历史脏数据 | 第十二轮只修了 UI 层 trim，但用户老版本已存的带换行/空白 key 升级后主流程仍 401，除非重新进设置页保存。底层 service 读写都 trim，治史 + 防御未来未拦截写入 |
-| skipFilter 开启后 fire-and-forget refresh（第十三轮 P3）| FeedRowView updated > 0 时除 postUnreadCount + invalidatePerCatCache 外，`Task { await service.refresh(cat) }` 立即跑 AI 派生 | invalidatePerCatCache 明确不清 lastRefreshDate → 不触发 stale 阈值；旧体验切开关后文章可见但推荐/日报空着等 30 分钟。refresh 内部 inflight 复用不会双开 AI |
-| URLNormalizer 保守归一化（第十三轮 P3）| 新 `Utils/URLNormalizer.swift`：trim / 小写 scheme+host / 去 fragment / 删 path 全部尾斜杠（含 root "/"）/ **保留** 全部 query + path 大小写。RefreshService existingURLs / seenURLs + AddFeedSheet 都用 | 旧裸字符串 `existingURLs.contains(raw.url)` 让 "/foo" vs "/foo/" / Example.com vs example.com / #fragment 差异都重复入库重复烧 token。保守原则：宁可漏归一化重复入库 1 次，不能误合并丢失不同文章。query 不能删（`?id=123` 是路径） |
-| handleSkipFilterPendingFlipped helper（第十四轮 P3）| RefreshService 加 `func handleSkipFilterPendingFlipped(for:context:)` 封装 postUnreadCount + invalidatePerCatCache + fire-and-forget refresh；FeedRowView / BuiltInFeedRowView 都调用 | 第十三轮只修了自定义源路径，内置源 saveSkipFilterChange 缺 refresh —— 文章可见但 AI 派生空着等 timer。典型 copy-paste 漏一半；helper 化两个 row 共享行为 |
-| BuiltInFeeds URLNormalizer 统一（第十四轮 P3）| `syncInto`：expectedURLs / expectedByURL / anyExistingURLs lookup 全部 normalize；`deduplicateArticles` 容灾去重 key 也 normalize | 旧 exact match 让历史用户自定义源 `https://OpenAI.com/news/RSS.xml` 与内置 `https://openai.com/news/rss.xml` 视为不同 → 重复共存。与 RefreshService 入库 + AddFeedSheet 添加 + 容灾去重规则统一 |
-| MenuBarView.onAppear 无条件 refreshIfNeeded（第十五轮 P2）| onAppear 读 saved tab 后直接 `Task { await refreshService.refreshIfNeeded(saved) }`，不依赖 onChange | 旧路径只在 selectedTab 变化才触发 refresh；saved 等于默认 .ai 时不触发 onChange，macOS App Nap / 睡眠期间 timer 没醒的窗口里打开菜单看到昨天的 digest/文章。refreshIfNeeded 内部 resetCrossedDayStateIfNeeded + 30 分钟 stale guard 保证不会过度刷新 |
-| 测试假阳性矫正（第十五轮 P3）| `testSyncSkipsBuiltInWhenCustomFeedExistsWithDifferentCase` path 从 `/news/RSS.xml` 改为 `/news/rss.xml`；断言改为"OpenAI 相关 feed 总数 == 1" | 旧测试 path 大小写敏感（normalizer 视为不同 URL）→ custom + builtIn 共存两条，Set 去重后元素数恒等 → "无重复"恒成立。退化为 exact match 时不会失败 → **挡不住回归**。new 断言"openaiFeeds.count == 1"才有真实回归挡力 |
-| refresh() startupError 守护（第十六轮 P2）| `refresh(_:)` 在 `resetCrossedDayStateIfNeeded()` 后 `guard startupError == nil else { return }`；覆盖所有经 refresh 的路径（refreshIfNeeded / lazy tab-switch / handleSystemWake）；force* 不走此路径不受影响 | AppDelegate 在 syncInto 失败时已 skip launchBackgroundRefreshIfNeeded 避免"无 feed → 0 文章 → lastRefreshDate 更新但 UI 空"，但 MenuBarView.onAppear 无条件 refreshIfNeeded（第十五轮引入）把这层保护从 UI 路径拆穿。service 层是统一底层入口，在此兜底最干净；守护放 reset 之后保证跨日清理仍执行让昨天 digest 失效 |
-| FeedsSettingsView 切 cat 清 checkResults（第十六轮 P3）| `onChange(of: selectedCategory)` 加 `checkResults = [:]` | summaryText 统计整个 checkResults 不按当前 cat 过滤；AI 页检测完"11/11 个源正常"切到财报/新闻仍显示旧分类汇总。检测结果本属某 cat 的 feed，切走即应失效，清空是最简正解 |
-| GeneralSettingsView toggle guard 兜底 reset（第十六轮 P3）| `toggleLaunchAtLogin` catch 照抄 FeedRowView.handleToggle 模式：arm guard → 回写 oldValue → `Task { @MainActor } 下一轮强制 reset` | 旧实现仅靠回写 oldValue 触发 onChange 来 reset isRevertingLaunchAtLogin；若该赋值因 SwiftUI 去重 / @AppStorage 行为没触发 onChange，guard 永久卡 true 吃掉用户下次真实 toggle（同 FeedRowView 已修过的时序陷阱）|
-| AddFeedSheet 原子 FeedDraft（第十七轮 P2）| 点击"添加"瞬间捕获 `FeedDraft{url,title,category}`（已 trim 的不可变值），`validateAndAdd(draft)` → 校验/去重/存盘全程只用它；强制添加路径存 `pendingDraft`，alert "仍要添加" 只保存该 draft | 旧路径校验用当时 trimmedURL，await 返回后 addFeed() 重读当前 UI 状态去重+建 Feed；用户在 RSS 请求期间改 URL/标题/分类会"验证通过 A，实际保存 B"。强制添加 alert 同病。捕获 draft 是最小原子边界，不必禁用输入 |
-| FeedsSettingsView checkRunID 挡 in-flight（第十七轮 P3）| 新增 `checkRunID`；checkFeed/checkAll 开始递增并捕获，await/group 回写前 `guard runID == checkRunID`；切 cat onChange 也 bump（+ 置 isCheckingAll=false）使旧 run 失效 | 第十六轮切 cat 清 checkResults 只挡静态串显示，挡不住 checkAll() 已启动的 task group 继续把旧分类结果回写污染新 tab。token 比对让"不是当前检测"的回写丢弃；checkAll 完成复位 isCheckingAll 也加 guard 避免覆盖切 cat 后的状态 |
-| skipFilter 回滚重入 guard（第十七轮 P3）| FeedRowView + BuiltInFeedRowView 各加 `isRevertingSkipFilter`；onChange 先判 guard 吃掉重入，catch 照抄 isEnabled 时序：arm guard → rollback + 回写 oldValue → Task 下一轮兜底 reset | 旧 skipFilter catch 直接 rollback + `feed.skipFilter = oldValue`，回写再触发 onChange → 重复 saveSkipFilterChange / 重复 alert。同文件 isEnabled 路径（handleToggle / Toggle onChange）早已做此 guard，skipFilter 漏了同级处理 |
-| checkRunID → categoryGeneration（第十八轮）| 计数器语义改为"分类代际"，**仅** onChange(selectedCategory) 递增；checkFeed/checkAll **只捕获不递增**，回写前 `guard generation == categoryGeneration` | 第十七轮用"每次操作递增"的全局 token 表达"同 cat 并发检测互不干扰"是错的——检测结果本就按 feed.id 落 checkResults 天然独立。旧实现引入两个回归：(1) 快速点两个不同源检测，后者 bump 让前者结果被丢弃永停"检测中"；(2) checkAll 运行中点单检 bump 让批量剩余结果回写时被丢弃。只有切 cat 才需整体失效，单 cat 内并发检测无需互相作废 |
-| summaryText 交集当前可见 feed（第十八轮）| `summaryText` 先 `Set(filteredFeeds.map(\.id))`，只统计 checkResults 中仍可见的 id | checkResults 是 [UUID: CheckStatus] 字典，切 cat 会清空但同 cat 内删源/加源/检测中列表变化会残留孤儿 id → 底部"x/y 个源正常"把已删源继续算进去。以可见 id 做交集是单点防御，胜过在每条删除/添加 mutation 路径散布清理（DRY + 免检测竞态）|
-| 保存按钮门控对齐检测（第十九轮 P3-1）| APISettingsView 保存按钮 disabled 由 `trimmedAPIKey.isEmpty` 改为 `trimmedAPIKey.isEmpty \|\| effectiveModel.isEmpty \|\| isChecking`，与"检测可用性"按钮一致 | 旧条件只判 key，但 `saveAndCheck()` 内 `guard !model.isEmpty` 还要求 model 非空 → 自定义模型为空时按钮可点却静默 return；检测中（.checking）未禁用 → 再点并发触发第二次 testConnection。UI 门控必须与业务 guard 同契约 |
-| 异步校验 request identity（第十九轮 P3-2）| AddFeedSheet（`validationGeneration`，仅 URL onChange 递增）+ APISettingsView（`checkGeneration`，4 处输入 onChange 经 `invalidateCheck()` 递增）；请求起始捕获 generation，await 返回后 `guard generation == 当前` 否则丢弃 | 第十七/十二轮已把 draft/key+model 原子捕获，但**回写时**无请求身份：用户在 RSS/testConnection 请求期间改输入（onChange 重置状态让按钮重新可点），旧请求返回仍会回写 UI、`addFeed(旧 draft)`、把旧 key/model 写进 prefs 并显示成功。同第十八轮 categoryGeneration 模式扩展到异步校验。关键：令牌递增处已复位状态为 `.idle`，过期 `return` 不回写不会让 UI 卡"检测中"。AddFeedSheet 仅 URL 失效——title/category 中途变更属第十七轮原子草稿"提交点击瞬间所选"既定语义 |
-| hasNewArticles 语义=可见新文章（第二十轮 P2）| `runFilterStage` 返回类型 `Bool` → `FilterStageOutcome{persisted, newlyAccepted}`；`runRefresh` 用 `newVisibleAtInsert`（入库即 accepted=true 数）`+ newlyAccepted`（filter 本轮判 true 数）`> 0` 取代 `!newArticles.isEmpty` 喂给 processAI | 旧实现把"RSS 入库数"当 hasNewArticles：财报这类有 filter 的 cat，本轮新抓文章全被 reject 时无任何用户可见新内容，却仍因 hasNewArticles=true 在 `shouldRegenerateRecommend` 首行强制重生推荐 + 时间窗满足时重生 digest，后台白烧 token。无 filter cat（AI/news）新文章 insert 即 accepted=true，`newVisibleAtInsert==newArticles.count`、`newlyAccepted=0`，等价旧逻辑零行为变更。newVisibleAtInsert 在 filterStage 的 await 前算成 Int 避免跨 await 持有 @Model（#23） |
-| RecommendItem/ArticleRow summary 永久 2 行 + 删 hover lineLimit（2026-05-30）| RecommendItemView/ArticleRowView 删 `@State isHovered` + `.onHover` + `.lineLimit(isHovered ? nil : 1)`；改 `.lineLimit(2).fixedSize(horizontal: false, vertical: true)` | hover 改 lineLimit 让 Text 内在高度变化 → 父 VStack 高度变化 → popover NSHostingView 触发 NSWindow `setFrameSize` → 在 `windowDidLayout` 回调 KVO 链路 `invalidateSafeAreaCornerInsets → requestUpdate → setNeedsUpdateConstraints → _postWindowNeedsUpdateConstraints` 抛 NSException → SIGTRAP（鼠标 hover 推荐项必崩，踩坑 #41）。永久 2 行 row 高度恒定 + 摘要可见性反而比 hover 才看更直接（产品决策走 grill Q1-G）。fixedSize(vertical:true) 必需：嵌套 VStack 内 Text 默认按 ideal 渲染 1 行，需明确"宽度由父决定高度按 ideal 多行算" |
-| RecommendItem 色条改 row overlay（2026-05-30）| 色条从 outer HStack child 改为整 row `.overlay(alignment: .leading) { Rectangle().frame(width: 3) }`；padding 同步从 inner HStack 移到外层（leading 12 = 3 色条 + 9 内容缩进；trailing 9；vertical 6）| summary 加 fixedSize(vertical:true) 后 inner VStack/HStack 都变 inflexible vertical，outer HStack layout 协商把 Rectangle `.frame(maxHeight: .infinity)` 当上限不强制撑满 → Rectangle 按自己很小的 ideal size 渲染 → row 上下 padding 6pt 区透明 → 视觉上 row 之间不连续。overlay 不参与 HStack layout 协商，自动 fill receiver 完整 frame 含 padding 区，row 间紧贴时贯穿 |
-| 推荐 ↔ 文章列表互斥折叠 `ExpandedSection` 单字段（2026-05-30）| 新增 `enum ExpandedSection { case recommend, case article }`；MenuBarView `@State expandedSection = .recommend`；两 section 受控 `@Binding<ExpandedSection>`；header tap toggle 在 .recommend/.article 之间；reset 触发：cat 切换 onChange 显式 reset + popover 重开 @State 自然 reset（不写 prefs，产品立场"每次重置"）。RecommendSection header 加 chevron + 整 header 可点（嵌入刷新 Button 事件不冒泡单独可点），折叠/展开形态完全一致只是下方推荐项隐藏 | hover 修复后摘要永久 2 行，5 项推荐区高度 ~440pt 已占大头，文章列表展开同时显示时 16 寸 MBP 总高度 ~1210pt 超 ~130pt 溢出屏幕底（Footer 看不见）。互斥折叠让 article 展开时 recommend 自动折省 ~400pt 给文章列表，listHeight 上限可从 260 上调 480 让 ~5 行文章可见。单字段 enum 是最简表达——B（recommend 可独立折叠）会出现"两者都折空荡 / 两者都展开撑爆 1000 兜底"两种不一致中间态；C（recommend header 完全不可点）失去"想看 article 时直接点 recommend 折叠"的快捷路径。Q1-A 已确认 |
-| popover maxHeight 1000 兜底（2026-05-30）| MenuBarView `.frame(width: 380).frame(maxHeight: 1000, alignment: .top)` | 即使互斥折叠 + listHeight 上限 480 已让 16 寸 MBP 默认 scaled 不溢出（总高 ~880pt），外接小屏 / 低 scaled 模式下 popover 仍可能溢出屏幕。maxHeight 是 1 行兜底常量，Linus 风格——解决 99% 场景，剩 1% 外接小屏未来按需再处理（vs GeometryReader 在 MenuBarExtra(.window) 首次 attach 时尺寸 0 的 quirk）|
-| ArticleListSection rowHeight 80→95 / listHeight 上限 260→480（2026-05-30）| rowHeight 估算 80→95（适配摘要 2 行后实测 ~93pt）；listHeight 上限 260→480（互斥折叠让 recommend 让出 ~400pt 后可上调） | rowHeight 注释原写"标题 2 行 + 摘要 1 行 + padding"，摘要 2 行后单 row 加 ~13pt（一行 caption 字号）；上限同步根据互斥折叠后剩余空间预算重算（recommend 折叠 36pt header + article 折叠 40pt header + Digest 186 + 其他 ~120 → 给 article 480pt 上限合计 880pt < maxHeight 1000）|
-| summary 超 2 行 hover `.help()` tooltip 看全文（2026-06-02）| RecommendItemView + ArticleRowView summary Text 各加 `.help(summary)`；行仍永久 `lineLimit(2) + fixedSize(vertical:true)` 高度恒定 | 用户需求"摘要超 2 行还想看全文"。踩坑 #41 红线是"hover 改 row 自身尺寸 → popover NSWindow 重算抛 NSException"，但 `.help()` 是 macOS 系统级独立 tooltip 窗口，完全不参与主 popover layout 协商、不改 row 尺寸，故不触发 #41。选 tooltip 而非自定义 `.popover`：KISS（一行代码）+ YAGNI（先验证体验，不满意再升级即时弹出/可控样式的 popover）。已验收"可以用"。trade-off：系统 tooltip 约 1 秒延迟、纯文本无富格式、不可定制——可接受 |
+| UI 布局 | 文章列表 → AI 推荐 → 今日摘要；推荐 ↔ 文章列表互斥折叠（`ExpandedSection` 单字段） | 操作项优先；互斥折叠避免 16 寸 MBP 溢出（recommend 展开占 ~440pt）|
+| 刷新策略 | 后台每小时 + 打开时按需（超 30 分钟触发）；跨日 `resetCrossedDayStateIfNeeded()` 双调用（timer + refreshIfNeeded） | 兼顾实时性；@Published 跨日从不自动失效（踩坑 #19）|
+| 已读状态 | 两个独立 @Query（未读在前 + 已读在后），标题色区分 | List Section header 有系统背景色问题；SwiftData 不支持 Bool 排序 |
+| AI 摘要服务 | 阿里云百炼 DashScope，模型可配置（默认 qwen3.6-plus）；支持千问/智谱/Kimi/MiniMax | — |
+| 密钥存储 | UserDefaults，**2026-06-12 起 API Key 改 Base64 编码防 `strings` 扫描 + 旧版明文自动迁移**（C1） | ad-hoc 签名避免弹授权窗口；UserDefaults 明文 key 易被 `strings` 提取 |
+| 数据持久化 | SwiftData（Feed / Article）+ UserDefaults（日报内容/生成时间/摘要数量） | 日报跨重启保留，次日自动失效 |
+| 分发方式 | 仅自用，ad-hoc 签名 + DMG（`hdiutil`）；README 朋友友好安装指南 | zip 解压双击触发 Gatekeeper "已损坏"；无 $99/年 Developer ID 时 DMG + "仍要打开" 性价比最高 |
+| RSS 抓取并发 | TaskGroup 全并发 | 各 feed 互相独立，无需限速 |
+| AI 摘要并发 | 手动单 cat / force\* 走有界并发（5）；**auto path（timer/wake/launch）顺序 await 三 cat**（QPS 峰值降到 5） | 后台路径优先可靠性，限速调整/key 多端共享时顺序更安全；最坏冷启动 ~1-2 分钟可接受 |
+| AI 生成触发 | 80% 完成度阈值 + Plan A delta≥3 补触发；`coverage` gate 同时挡 recommend 与 digest | 避免部分失败生成低质内容；候选源统一 `snapshot.summarized` 防 nil-summary 烧 token |
+| 服务架构 | 外观（RefreshService）+ SummaryPipeline + RecommendEngine + DigestEngine + ArticleSnapshot + FilterPipeline；2026-06-12 RefreshService 拆 `+RSS` / `+AI` 三文件 | Engine 纯业务可独立单测；外观集中编排 + 原子 commit；拆分消 God-object |
+| 视图组织 | `Views/MenuBar/` + `Views/Settings/` + `Views/DesignTokens/` 子目录；EnvironmentObject 注入 RefreshService；子 view 用 `.id(selectedTab)` 切换重建（踩坑 #36） | 单文件 <200 行；singleton 散布点 12+ → 1 处（AINewsBarApp）|
+| 错误处理 | `ModelContext+Safe` 双轨：`safeFetch/safeSave`（容忍）+ `safeFetchOrThrow/safeSaveOrThrow`（关键路径严格抛出） | 替代散落 25+ 处 `try?` 吞错；caller 显式区分"真无数据"vs"fetch 失败"（踩坑 #22）|
+| AI DI | `AISummarizing` 方法签名带 `model: String` 显式参数（无 `.ai` default）；BailianService 不读 prefs | 解除 `PreferencesService.shared.getModel()` 单例后门，测试可完全 mock |
+| Token 用量 | 明细级 `UsageRecord` @Model；scene = summary/recommend/digest/filter（testConnection 不入库）；失败强制 tokens=0 + success=false；写入经 `AISummarizing` 三方法返回 UsageInfo → RefreshService 集中 record | 失败语义="花了但没生效"；趋势按 token 求和不被失败污染 |
+| Startup 启动逻辑 | 全部在 `AppDelegate.applicationDidFinishLaunching`（container / UsageRecorder / configure / feed sync / postUnreadCount / launchBackgroundRefreshIfNeeded / NSWorkspace.didWakeNotification）；`configure()` 只注入依赖，`scheduleTimer` 在 launch 内部（sync 成功才调） | popover view lazy 创建，`.task` 冷启动不触发（踩坑 #13）；sync 失败时 timer 不该仍 hourly 触发空刷新 |
+| 跨日 guard 字段 | `lastResetCheckDate: Date?` 与 `lastRefreshDate` 解耦（仅 reset 内部 set） | 单字段同时做 UI 显示 + guard 会被业务路径漂白（踩坑 #21）|
+| force/auto 并发互斥 | per-cat `refreshTasks: Task<Void, Never>?` inflight 复用，所有入口 `await existing.value` | 避免双发 AI/双 commit/双扣 token（踩坑 #25）|
+| Pipeline 取消语义 | `.cancelled` 状态独立于 `.failure`，不计 failed 不记 UsageRecord；三点 checkpoint | 取消不是 AI 失败；TaskGroup 取消是协作式（踩坑 #26）|
+| 启动数据库容灾 | 二次构造失败 in-memory fallback，三次失败 fatalError；schemaVersion 不匹配 nuke + 白名单清业务 prefs；启动 sanity sweep 三 model（fetch 1 条触发 mandatory 校验）| 个人工具优先可用性；静默删除失败必须可观测（踩坑 #40）|
+| 测试 Timer 清理 | RefreshService 暴露 `stop()`；测试 tearDown 显式调用 | Swift 5.9 不支持 `@MainActor isolated deinit`（踩坑 #30）|
+| AI 输出净化 | `MarkdownStripper.strip` 双点接入（DigestEngine.run + SummaryPipeline.runOne）+ prompt 端追加纯文本约束 | 单 prompt 不可靠（temperature > 0）；单 strip 易结构错乱；两手都要硬 |
+| Category 维度落位 | Feed/Article/UsageRecord 加 `category: String` 冗余；3 cat 硬编码 enum；CategoryConfig 持 per-cat filterPrompt + recommendCount | SwiftData @Query 不支持 join，冗余 1 字段换 O(1) 过滤 |
+| Filter Stage 落位 | 入库后标 `accepted: Bool?`（nil/true/false，默认 nil）；财报必备其他可选；`BailianError.malformedResponse` 才计 classification fail → recordFilterFailure，其他错误算 transient 下轮重试 | 入库前 filter 会每次重判 reject 反复烧 token；网络抖动/401/429 不能累计永久 reject |
+| 协议双轨策略 | 协议加 cat 时**不留旧无 cat fallback**（2026-05-25 全删过渡 fallback） | 过渡期遗留会让 caller 图省事"默认落 .ai"静默漏改 |
+| Migration 全清策略 | schemaVersion 不匹配则 nuke 旧 store + 白名单清 `com.ainewsbar.*`（保 API Key + Model + launchAtLogin）；**任何 v2 内部 schema 演进（含字段 init 默认值变更）都必须 bump r3/r4** | 接受历史数据全清；schemaVersion 颗粒度太粗会留 NULL 行（踩坑 #40）|
+| CategoryTabBar | 自定义 HStack 3 Button 等宽替代 Picker.segmented；选中态 `unemphasizedSelectedContentBackgroundColor` | macOS Picker.segmented 按内容宽度无法等分撑满（踩坑 #35）|
+| AI 错误分级 | `GlobalAIError`：401→invalidAPIKey / 403→forbidden（模型未授权）/ 429→quotaExceeded / 5xx→other / 网络→networkUnreachable | 一锅炖让用户怀疑代码 bug |
+| credentials CQS | `currentCredentials()` 纯查询 + `ensureCredentials(cat:)` 显式 command | 旧 `currentCredentials(cat:)` 名似 query 实是 command |
+| FeedRow toggle | 自定义 `Binding(get:set:)`：set 里先 mutate → persist，失败 `context.rollback()` 自动回弹；4 处 isReverting guard + Task 兜底全删 | 双向绑定做"需校验会失败有副作用"的写入是反模式；校验前移到提交前（踩坑 #24 失败回滚）|
+| 原子捕获 + 异步失效令牌 | AddFeedSheet/APISettingsView 点击瞬间捕获不可变 draft；`categoryGeneration`/`validationGeneration`/`checkGeneration` 仅在输入 onChange 递增，await 返回 `guard generation == 当前` 才回写 | 用户在异步请求期间改输入，旧请求不该回写 UI/存旧值进 prefs；令牌递增处已复位状态，过期 return 不卡"检测中" |
+| RSS/open scheme 校验 | RSSService.fetchRawArticles 与 MenuBarView.openArticle 都 guard `http/https` | RSS 是外部输入；NSWorkspace.open 不应被诱导打开任意 scheme |
+| URLNormalizer 保守归一化 | trim / 小写 scheme+host / 去 fragment / 删 path 尾斜杠 / **保留** query + path 大小写 | 保守：宁可漏归一化重复入库，不能误合并丢失；query 不能删 |
+| summary 永久 2 行 + tooltip | RecommendItemView/ArticleRowView summary `lineLimit(2).fixedSize(vertical:true)` 恒定高度 + `.help(summary)` 系统级 tooltip 看全文 | hover 改 row 尺寸必崩（踩坑 #41）；tooltip 独立窗口不参与 popover layout |
+| hasNewArticles 语义 | `FilterStageOutcome{persisted, newlyAccepted}`；用"入库即 accepted=true + filter 本轮判 true"喂 processAI，而非 RSS 入库数 | 财报 cat 本轮全 reject 时无可见新内容，不该白烧 token 重生派生 |
 
 ---
 
@@ -243,38 +111,39 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 - `App/AppDelegate.swift` — **冷启动 entry**：`static let container` + `applicationDidFinishLaunching` 接管所有 startup + NSWorkspace.didWakeNotification 监听 + 二次失败 in-memory fallback
 
 ### Services（外观 + 组件）
-- `Services/RefreshService.swift` — **外观** (~620 行；2026-06-12 C2 拆三文件)：`@Published private(set) states: [Category: CategoryState]` per-cat dict；公开 API：`refresh(_:)` / `forceRegenerate{Recommend,Digest}(_:)` / `refreshIfNeeded(_:)` / `handleSystemWake()` / `markAvailability(_:for:)` / `state(for:)` / `isSummarizing(category:)` / `stop()`；DEBUG-only `_testMutate(for:_:)`；per-cat `refreshTasks` inflight 复用；`refreshAllCatsSequentially`；`runRefresh` defer + capturedFetchErrors；`currentCredentials()` / `ensureCredentials(cat:)` CQS
-- `Services/RefreshService+RSS.swift` — RSS 抓取/去重/清理组件（~112 行；2026-06-12 拆分）；`FeedResult` / `fetchAllFeeds` / `mergeNewArticles` / `cleanupOldArticles`×2
-- `Services/RefreshService+AI.swift` — AI Filter/Summary/Recommend/Digest/Commit 组件（~319 行；2026-06-12 拆分）；`FilterStageOutcome` / `runFilterStage` / `processAI` / `runRecommend` / `runDigest` / `commit`×2 / `commitSummaries`
-- `Services/SummaryPipeline.swift` — 摘要并发管道（102 行；2026-06-12 H2 消重）；`PipelineConcurrency.run` 替代内联循环
+- `Services/RefreshService.swift` — **外观**：`@Published private(set) states: [Category: CategoryState]` per-cat dict；公开 API：`refresh(_:)` / `forceRegenerate{Recommend,Digest}(_:)` / `refreshIfNeeded(_:)` / `handleSystemWake()` / `markAvailability(_:for:)` / `applyCredentialChange()` / `invalidatePerCatCache(for:)` / `stop()`；DEBUG-only `_testMutate(for:_:)`；per-cat `refreshTasks` inflight 复用；`refreshAllCatsSequentially`；`currentCredentials()` / `ensureCredentials(cat:)` CQS
+- `Services/RefreshService+RSS.swift` — RSS 抓取/去重/清理组件；`FeedResult` / `fetchAllFeeds` / `mergeNewArticles` / `cleanupOldArticles`×2
+- `Services/RefreshService+AI.swift` — AI Filter/Summary/Recommend/Digest/Commit 组件；`FilterStageOutcome` / `runFilterStage` / `processAI` / `runRecommend` / `runDigest` / `commit`×2
+- `Services/SummaryPipeline.swift` — 摘要并发管道；`PipelineConcurrency.run` 替代内联循环
 - `Services/RecommendEngine.swift` / `DigestEngine.swift` — 纯执行器；Outcome 含 UsageInfo
-- `Services/FilterPipeline.swift`（v2）— 5 路并发 filter（140 行；2026-06-12 H2 消重）；`PipelineConcurrency.run` 替代内联循环；返回 acceptedIds / rejectedIds / classificationFailedIds / transientFailedIds + usages
-- `Services/PipelineConcurrency.swift` — 有界并发 TaskGroup 执行器（~43 行；2026-06-12 H2 新增）；消除 SummaryPipeline / FilterPipeline 复制粘贴
-- `Services/ArticleSnapshot.swift` — Sendable 值快照；`capture(from:category:)` + `captureOrThrow(from:category:)`（严格版供关键路径）
-- `Services/BailianService.swift` — DashScope HTTP（曾名 ClaudeService）；显式 model 参数；`BailianError`（`.httpStatus` / `.malformedResponse` / `.insufficientCandidates`）；4 prompt 工厂 per-cat 静态方法（L1 删 .ai default）；`classifyArticle` filter API
-- `Services/PreferencesService.swift` — UserDefaults 后端（曾名 KeychainService）；per-cat key 拼接 `com.ainewsbar.<base>.<cat>`；`clearDigest` / `clearRecommendState` 拆开（#16）
+- `Services/FilterPipeline.swift` — 5 路并发 filter；返回 acceptedIds / rejectedIds / classificationFailedIds / transientFailedIds + usages
+- `Services/PipelineConcurrency.swift` — 有界并发 TaskGroup 执行器（消除 SummaryPipeline / FilterPipeline 复制粘贴）
+- `Services/ArticleSnapshot.swift` — Sendable 值快照；仅留 `captureOrThrow`（tolerant 版已删，踩坑 #22 同型）
+- `Services/BailianService.swift` — DashScope HTTP；显式 model 参数；`BailianError`（`.httpStatus` / `.malformedResponse` / `.insufficientCandidates`）；4 prompt 工厂 per-cat 静态方法；`classifyArticle` filter API
+- `Services/PreferencesService.swift` — UserDefaults 后端；per-cat key 拼接 `com.ainewsbar.<base>.<cat>`；API Key Base64 编码（C1）；读写都 trim
 - `Services/ServiceProtocols.swift` — `RSSFetching` / `AISummarizing`（per-cat 显式协议无 fallback）/ `PreferencesStoring`
 - `Services/RefreshDecision.swift` — 触发决策纯函数集，时钟参数注入
-- `Services/RSSService.swift` — FeedKit actor；`RawArticle.publishedAt: Date?`（nil 不入库 #17）；UA + Accept header 防 403
-- `Services/BuiltInFeeds.swift` — **v2: 26 内置源（11 AI + 8 财报 + 7 新闻）**；`syncInto(context:)` strict 同步 + categoryChanged 路径先改 feed 再删 articles（M2）；`deduplicateArticles` 重建容灾
-- `Services/FeedSettingsStore.swift` — 集中处理 feed 启停/删除：`persistBuiltInEnabledChange` / `deleteCustomFeeds`；strict 删 articles + 失败 rollback；调用方负责 UI 状态回滚
+- `Services/RSSService.swift` — FeedKit actor；`RawArticle.publishedAt: Date?`（nil 不入库，踩坑 #17）；UA + Accept header 防 403；`preferredAtomLink` 优先 rel=alternate（踩坑 #38）
+- `Services/BuiltInFeeds.swift` — **v2: 26 内置源（11 AI + 8 财报 + 7 新闻）**；`syncInto(context:)` strict 同步 + categoryChanged 路径先改 feed 再删 articles；`deduplicateArticles` 重建容灾
+- `Services/FeedSettingsStore.swift` — 集中处理 feed 启停/删除：`persistBuiltInEnabledChange` / `deleteCustomFeeds` / `handleSkipFilterPendingFlipped`；strict 删 articles + 失败 rollback
 - `Services/UsageRecording.swift` / `UsageRecorder.swift` / `UsageAggregator.swift` / `UsageFormatter.swift` — Token 用量协议/SwiftData 实现/纯函数聚合/格式化
 
 ### Models
-- `Models/Article.swift` — `@Model` + category +accepted (Bool? L2 nil default) +filterFailCount +`recordFilterFailure(maxBeforeReject:)` extension（M1）
+- `Models/Article.swift` — `@Model` + category + accepted (Bool? nil default) + filterFailCount + `recordFilterFailure(maxBeforeReject:)` extension
 - `Models/Feed.swift` — `@Model` + category + skipFilter（v2 跳过 AI filter 的"纯净源"toggle）
-- `Models/Category.swift` — 3 cat enum + `from(rawValue:)` 解析失败 Log（L3）
+- `Models/Category.swift` — 3 cat enum + `from(rawValue:)` 解析失败 Log
 - `Models/CategoryConfig.swift` — per-cat 配置（filterPrompt / recommendCount）
-- `Models/UsageRecord.swift` — `@Model` + category + UsageScene（含 `.filter` v2）+ UsageInfo
+- `Models/UsageRecord.swift` — `@Model` + category + UsageScene（含 `.filter`）+ UsageInfo
 
 ### Utils
 - `Utils/ModelContext+Safe.swift` — 双轨 API：失败容忍版 + 严格抛出版；含调用位置日志
 - `Utils/Log.swift` — `os.Logger` 包装；subsystem=`com.ainewsbar`
-- `Utils/RelativeDateFormat.swift` — 纯函数 `formatArticleRelative(_:now:calendar:)` 时钟注入；用 `startOfDay(for:)` 手算 days（#32）
+- `Utils/RelativeDateFormat.swift` — 纯函数 `formatArticleRelative(_:now:calendar:)` 时钟注入；用 `startOfDay(for:)` 手算 days（踩坑 #32）
 - `Utils/MarkdownStripper.swift` — strip `**` / `__` / 行首 `# ## ###`；保留行首 `- * +` 中文列表层次
+- `Utils/URLNormalizer.swift` — 保守 URL 归一化
 
 ### Views
-完整列表见 `Sources/AINewsBar/Views/` 子目录（拆分 MenuBar/ + Settings/ + DesignTokens/）。Banner 区分 global vs per-cat；CategoryTabBar 用自定义 HStack 替代 macOS Picker.segmented（#35）；子 view 用 `.id(selectedTab)` 切换重建（#36）。
+完整列表见 `Sources/AINewsBar/Views/` 子目录（MenuBar/ + Settings/ + DesignTokens/）。Banner 区分 startup/global/per-cat 三级优先级；CategoryTabBar 用自定义 HStack 替代 macOS Picker.segmented（踩坑 #35）；子 view 用 `.id(selectedTab)` 切换重建（踩坑 #36）；`Settings/FeedRowComponents.swift` 合并两 FeedRow 共享 UI（H3）。
 
 ### 其他
 - `docs/plans/optimization-plan.md` — v1 阶段 4 项重构
@@ -287,164 +156,67 @@ build/AINewsBar.app/Contents/MacOS/AINewsBar &
 
 v2: 26 个 = 11 AI + 8 财报 + 7 新闻。完整列表见 `Sources/AINewsBar/Services/BuiltInFeeds.swift` 或 `README.md` § 内置订阅源。
 
-> **新闻 tab 定位（2026-05-29）**：聚焦实时/社会/国际，去科技去娱乐。7 源 = NYT World + BBC World + FT 中文新闻 + 新华网时政 + 人民日报时政 + 新华网社会 + 澎湃新闻（国内 4 / 国际 3 均衡）。删旧科技源（HN/The Verge/36氪，科技由 AI tab 覆盖）；BBC 综合 `news/rss.xml` 换分版块 `news/world/rss.xml`（去娱乐/体育）；新增社会民生维度（新华网社会版 `society/news_society.xml` 官方直连 + 澎湃市场化视角）。`CategoryConfig.news.filterPrompt` 仍 nil（源头干净，不开 filter 不烧 token）。
+> **新闻 tab 定位**：聚焦实时/社会/国际，去科技去娱乐。7 源 = NYT World + BBC World + FT 中文新闻 + 新华网时政 + 人民日报时政 + 新华网社会 + 澎湃新闻（国内 4 / 国际 3 均衡）。`CategoryConfig.news.filterPrompt` nil（源头干净不开 filter）。
 
-> **中文财报源镜像依赖**：华尔街见闻 / 第一财经 / 东方财富 / 财新等官方 RSS 全部 404 或返 HTML。2026-05-25 通过 RSSHub 公共镜像 `rsshub.rssforever.com` 引入财联社头条 + 华尔街见闻全球；备用镜像 `rss.injahow.cn` 同路径可用。RSSHub 公共实例随时可能被反爬升级或下线 — known risk，可接受。**澎湃新闻（新闻 tab）同走该镜像同款 known risk。**
+> **中文源镜像依赖**：华尔街见闻 / 第一财经 / 东方财富 / 财新 / 澎湃等官方 RSS 全部 404 或返 HTML，走 RSSHub 公共镜像 `rsshub.rssforever.com`（备用 `rss.injahow.cn`）。公共实例随时可能被反爬升级或下线 — known risk，可接受。
 
 ---
 
 ## 踩坑记录
 
-每条精简为 "**根因** + **修复**"；详情见对应 commit 与代码注释。
+每条精简为 "**根因** + **修复/防御**"；完整历史见对应 commit 与代码注释。
 
-### 1. List 里 Button 渲染空白
-**根因**：MenuBarExtra(.window) + Button + .buttonStyle(.plain) + List 是 SwiftUI bug，LazyVStack+ScrollView 同样空白。**修复**：`VStack + .contentShape(Rectangle()) + .onTapGesture` 替代 Button。
+### 高价值通用陷阱（完整保留）
 
-### 2. SwiftData 新增非可选字段崩溃
-**根因**：自动迁移不支持新增非可选属性。**修复**：catch 块删 `~/Library/Application Support/default.store*` 重建。v2 起 schemaVersion 检测主动 nuke。
+**#5. SwiftData `@Model` 不能跨 actor / 跨 await 传递**（原 #5 + #23 合并）
+**根因**：跨 actor 边界或跨 `await` 持有 `@Model`，会静默数据丢失 / 崩溃 / 写入被吞（await 期间对象可能 detach）。**防御**：进 TaskGroup / await 前转 `Sendable` 值类型（`RawArticle` / `SummaryTask`），完成后 @MainActor 按 id 重 fetch alive Article 写回；@Model 引用安全寿命 = 同一 RunLoop turn。
 
-### 3. `open` 命令静默失败
-**修复**：`build/AINewsBar.app/Contents/MacOS/AINewsBar &` 直接启动，不用 `open`。
+**#17. RSS pubDate 缺失伪造"现在" → 脏文章每日重生**
+**根因**：fallback `Date()` 使无 pubDate 的脏 URL 每天被清→次日 pubDate=now 重生循环。**防御**：`RawArticle.publishedAt: Date?`，nil 直接丢弃。
 
-### 4. 裸二进制 MenuBarExtra 图标不显示
-**修复**：必须放进 .app bundle（依赖 bundle 上下文 + Info.plist 的 `LSUIElement=true`）。
+**#19. 跨日时 @Published UI 状态从未自动失效（最隐蔽）**
+**根因**：SwiftData / UserDefaults 跨日清理与 `@Published` 状态清理是两件事；应用驻留时 `@Published var dailyDigest` 一直保留昨天值，仅清 prefs 无法让 UI 切换。**防御**：`resetCrossedDayStateIfNeeded()` 同时清 SwiftData + @Published + prefs 三层，timer + refreshIfNeeded 双调用。
 
-### 5. SwiftData @Model 不能跨 actor 传递
-**根因**：跨边界使用导致静默数据丢失或崩溃。**修复**：RSSService 返回 `RawArticle: Sendable` 值类型；TaskGroup 子任务用 `SummaryTask: Sendable`，结果回 @MainActor 后按 id 重 fetch 写回。
+**#21. 单字段同时做 UI 显示 + decision guard 会被业务路径漂白**
+**根因**：`lastRefreshDate` 既显示 Footer 又用于跨日 guard，但 `refresh()` 末尾写 `Date()` 抹掉跨日信号 → guard 永远 false。**防御**：guard 用专用字段（`lastResetCheckDate`），仅由 guard 函数内部 set。心得：状态字段双重语义必被业务漂白，分离关注点。
 
-### 6. @Query 日期谓词初始化时捕获
-**根因**：`#Predicate` 里 `Date()` 在 init 时求值，不会更新。**修复**：日期过滤放 Service 层；@Query 只做 isRead / category 过滤。
+**#22. `safeFetch` 失败静默空集合 → 下游"假空决策"连锁**
+**根因**：持久层封装出错 fallback `[]`，下游把"真错"当"真无"。`existingURLs` 假空→重插重复；`pending` 假空→跳过摘要；`ArticleSnapshot` 假空→跳过推荐/日报。**防御**：双轨 API，关键路径用 `safeFetchOrThrow/safeSaveOrThrow`，caller 显式 catch。心得：数据库场景的"默认安全 fallback"几乎都是错的——出错就要嚷出来。
 
-### 7. SwiftData 不支持对 Bool 排序
-**根因**：`SortDescriptor(\.isRead)` 编译报错（`NSObject` 限制）。**修复**：拆两个独立 @Query（isRead==false / ==true），中间插入普通行作分隔。
+**#24. 关键写入失败被吞 + 旁路副作用仍写 → 永久数据不一致**
+**根因**：DB save 失败只 Log，但 token 已记、prefs 已写、UI 已更新 → 磁盘内存永久分裂。**防御**：写入失败时所有相关副作用（token / prefs / UI 状态）必须一起回滚——`context.rollback()` + 设可观察错误状态 + token 记 success=false + 不写旁路 prefs。FeedRow toggle 同理：用自定义 `Binding(set:)` 把校验前移到提交前，失败 rollback 自动回弹。
 
-### 8. List Section header 带系统背景色
-**根因**：`.listStyle(.plain)` 下 Section header 在浅色外观下明显偏红。**修复**：不用 Section，改普通 HStack 行 + 自定义 `.listRowBackground`。
+**#25. refresh() 与 forceRegenerate\* 不互斥 → 双 commit + 双扣 token**
+**根因**：各入口 guard 各自的 `isXxx` flag 互不阻断，并发发出两次 AI 请求，commit 互相覆盖。**防御**：`refreshTasks: Task<Void, Never>?` inflight 复用，所有入口 `await existing.value`。UI "是否在跑" flag 仅做进度显示；并发互斥另用 Task 字段。两套语义不要复用一个 var。
 
-### 9. 嵌套 HStack 中 Text 高度变化不传父容器
-**根因**：lineLimit 从 1 变 nil 时文字撑高，父 HStack 不跟随。**修复**：可变高 Text 加 `.fixedSize(horizontal: false, vertical: true)`。
+**#26. `withTaskGroup` 不响应 `Task.isCancelled` → 取消后仍跑完烧 token**
+**根因**：Swift Structured Concurrency 取消是协作式的，TaskGroup 不自动传播给在跑子任务。**防御**：三点 checkpoint（addTask 前 / for await 循环内 cancelAll / runOne 内）+ `.cancelled` outcome 独立于 `.failure`（取消不是失败，不计 failed 不记 UsageRecord）。
 
-### 10. TaskGroup 摘要 @Model 跨边界
-**修复**：进入 TaskGroup 前提取 `SummaryTask: Sendable`；完成后 @MainActor 按 id 查找原 Article 写入。（同 #5 的具体场景）
+**#28. 清理类操作 fallback 选错方向 → 极端情况清空整表**
+**根因**：`cleanupOlderThan` 的 `cutoff ?? Date()` fallback 让 cutoff 落到现在，predicate 匹配全部 → 删空整表。**防御**：删除/清理/reset 类 fallback 必须朝 no-op 方向（`.distantPast`），绝不朝"全干掉"方向；重要 fallback 用 `guard let`。同理：删 store 文件失败不能让 schemaVersion guard 错误推进。
 
-### 11. 日报 prompt 只用标题忽略摘要
-**修复**：prompt 改 `"- \(title)｜\(summary)"` 格式。
+**#31. `@unchecked Sendable` mock 的 var 计数器并发数据丢失**
+**根因**：`@unchecked Sendable` 是"我信任自己处理同步"的承诺不是免责声明。`MockAI` 的 `var callCount` 在 5 路并发下 read-modify-write 无内存屏障，计数丢失 → 核心断言失去检验能力，测试虚假通过。**防御**：真正被并发写的字段配 `NSLock + withLock`；只读并发安全的（setUp 写、generate 读）不锁。
 
-### 12. `commit(DigestEngine.Outcome)` 不能重置 aiAvailability
-**根因**：Recommend 失败设 .unavailable 被 Digest 成功覆盖。**修复**：Digest commit 不动 aiAvailability；Recommend 是 AI 状态主指示器。
+**#39. SwiftData ModelContainer 被 `let (_, context)` 立即 ARC 释放 → context SIGTRAP 无 stack trace**
+**根因**：ModelContext 不强引用 ModelContainer（不像 Core Data PSC），container 被 ARC 释放后 context 调任何方法触发 SIGTRAP（signal code 5），无堆栈无断言。**防御**：`let (container, context) = ...; _ = container` 显式保活，或挪 setUp storedProperty。心得：测试场景"工厂返回 (Owner, Borrowed)"永远要保活 Owner。
 
-### 13. MenuBarExtra popover view lazy 创建，`.task` 冷启动不触发
-**根因**：popover 内 view 只在用户首次点击时构造，timer 永不启动。**修复**：所有 startup 挪到 `AppDelegate.applicationDidFinishLaunching`。
+**#40. schemaVersion 颗粒度太粗 + 删 store 失败仍推进版本号 → v2 内部演进留 NULL 行**
+**根因**：v2 phase 1 后字段 init 默认值变更（如 `Article.accepted` true→nil）虽不改物理 schema，但旧行新加列值 NULL → 非可选字段 fetch 时 mandatory 校验失败。schemaVersion 字符串没 bump → guard 跳过 nuke。叠加删 store 失败只 Log 不 throw → 版本号仍推进，旧库残留共存。**防御**：任何 @Model 字段（尤其非可选）改动都当 schema 不兼容变更，bump schemaVersion；migration func 改 throws，删 store 失败不推进版本号；启动 sanity sweep fetch 1 条触发 mandatory 校验做最后防线。心得：SwiftData 是 lazy validation，构造成功 ≠ 数据完整。
 
-### 14. 多 ModelContext 导致 @Query 看不到 Service 写入
-**根因**：ad-hoc context 与 SwiftUI 注入的 main context 共享容器但内存视图独立。**修复**：统一用 `AppDelegate.container.mainContext`。
+**#41. SwiftUI hover 改子 view 内在尺寸 → MenuBarExtra(.window) popover NSWindow 重算抛 NSException 必崩**
+**根因**：`.lineLimit(isHovered ? nil : 1)` 让 Text 扩行 → 父容器高度变化 → NSHostingView `setFrameSize` → NSWindow KVO 链 → `_postWindowNeedsUpdateConstraints` 在 layout 周期内二次调用抛 NSException → SIGTRAP。**防御**：popover 内交互态变化优先用不改 size 的属性（颜色/透明度/阴影/scale）；看全文改 lineLimit 常量值 / 独立 `.help()` tooltip / 独立 popover。配套：`fixedSize(vertical:true)` 后 HStack 把 `.frame(maxHeight:.infinity)` 当上限不强制撑满，色条需改 `.overlay` fill receiver。
 
-### 15. `configure(with:usage:)` 默认 nil 覆盖前次注入
-**根因**：两处调 configure，第二次 `usage: nil` 默认值覆盖第一次。**修复**：configure 统一为单一调用点。
+### 早期基础坑（已封装解决，一行速查）
 
-### 16. `clearDigest()` 副作用扩散到推荐
-**根因**：clearDigest 同时清推荐计数 key，命名说谎。**修复**：拆 `clearDigest` + `clearRecommendState`，caller 显式两次调用。
+**#1/#8/#20/#36. List/SwiftUI 渲染**：①（#1）MenuBarExtra(.window) 内 `Button + .buttonStyle(.plain)` 放 List 渲染空白 → 用 `VStack + .contentShape(Rectangle()) + .onTapGesture`；②（#8）List Section header 带系统背景色 → 改普通 HStack 行；③（#20）`Divider()` 占纵向空间切断 leading 色条 → 去 Divider 靠 padding 自然分隔；④（#36）cat-aware view 的 @State 在 cat 切换被继承 → `.id(selectedTab)` 强制重建。
 
-### 17. RSS pubDate 缺失伪造"现在"导致脏文章每日重生
-**根因**：fallback `Date()` 使无 pubDate 的脏 URL 每天被清→次日 pubDate=now 重生循环。**修复**：`RawArticle.publishedAt: Date?`，nil 直接丢弃。
+**#2/#6/#7/#14/#34. SwiftData 基础**：①（#2）新增非可选字段自动迁移 fatalError → catch 块删 store 重建（v2 起 schemaVersion 检测主动 nuke）；②（#6）@Query `#Predicate` 内 `Date()` 在 init 时捕获不更新 → 日期过滤放 Service 层；③（#7）SwiftData 不支持 Bool 排序 → 拆两个 @Query；④（#14）多 ModelContext 共享容器但内存视图独立 → 统一 `container.mainContext`；⑤（#34）@Query 谓词 3 个 `&&` 让 type-checker 超时 → 谓词只放 1 条件（category），其余 view 层 filter。
 
-### 18. SwiftUI 内置 `Text(date, style: .relative)` 无方向且 tick
-**根因**：内置 API 显示 "3 hours" 无中文方向 + tick 更新。**修复**：自定义 `formatArticleRelative(_:now:calendar:)`：刚刚/X分钟前/X小时前/昨天/N天前/M-d。
+**#13/#15/#37. MenuBarExtra / 启动**：①（#13）popover view lazy 创建，`.task` 冷启动不触发 → startup 全挪 AppDelegate；②（#15）`configure(usage: nil = nil)` 默认值覆盖前次注入 → 去默认值或单一调用点；③（#37）启动期 RSS fetch 常见 race（DNS/网络栈未就绪）→ UI 标数据时态 + 一键重试。
 
-### 19. 跨日时 @Published UI 状态从未自动失效（最隐蔽 bug）
-**根因**：loadPersistedState 跨日逻辑只在 configure() 跑一次；应用驻留时 @Published var dailyDigest 一直保留昨天值。**修复**：`resetCrossedDayStateIfNeeded()` 在 timer + refreshIfNeeded 双调用，清 SwiftData + @Published + prefs 三层。
+**#10/#18/#29/#30/#32. Swift 并发 / 时钟**：①（#10）TaskGroup 摘要 @Model 跨边界（同踩坑 #5）；②（#18）内置 `Text(date, style:.relative)` 无中文方向 + tick → 自定义 `formatArticleRelative`；③（#29）@Query 不响应系统时钟，跨午夜不重 eval → `@State now` + Timer + onReceive 跨日才 set；④（#30）Swift 5.9 不支持 `@MainActor isolated deinit` → 暴露 `stop()`；⑤（#32）`Calendar.isDateInToday/Yesterday` 内部以系统 `Date()` 锚定忽略参数 → `startOfDay` + `dateComponents` 手算。
 
-### 20. `Divider().padding(.leading, 34)` 切断 RecommendItemView 左色条
-**根因**：Divider 自身 1pt 高度让父容器 quaternary 背景从最左侧透出。**修复**：去 Divider，靠 RecommendItemView 自身 padding 自然分隔。心得：任何"行间分隔元素"都会占纵向空间，与"贯穿色条"冲突。
+**#9/#11/#12/#16/#27/#33/#35/#38. AI / UI 杂项**：①（#9）嵌套 HStack Text 高度变化不传父 → `.fixedSize(horizontal:false, vertical:true)`；②（#11）日报 prompt 只用标题忽略摘要 → `"- \(title)｜\(summary)"`；③（#12）`commit(DigestEngine.Outcome)` 不应重置 aiAvailability（Recommend 是主指示器）；④（#16）`clearDigest()` 不能连带清推荐计数 key（拆 `clearRecommendState`）；⑤（#27）`Dictionary(uniqueKeysWithValues:)` 容灾路径会 fatalError → `uniquingKeysWith`；⑥（#33）macOS `.buttonStyle(.plain)` 外层 `.foregroundStyle` 不生效 → 移到 label 内 Text 或用 `.tint()`；⑦（#35）`Picker(.segmented)` 无法等分撑满 → 自定义 HStack；⑧（#38）Atom `entry.links?.first` 可能拿到 rel=self → 优先 rel=alternate。
 
-### 21. 复用单字段做 UI 显示 + 跨日 guard 会被业务路径漂白
-**根因**：lastRefreshDate 被 refresh() 末尾抹掉跨日信号，guard 永远 false。**修复**：拆 `lastResetCheckDate: Date?` 专用 guard，仅 reset 内部 set。心得：状态字段双重语义必被业务漂白，分离关注点。
-
-### 22. `safeFetch` 失败静默空集合 → 下游"假空决策"连锁
-**根因**：existingURLs 假空让全部抓回文章重插；pending 假空跳过摘要；ArticleSnapshot 假空跳过推荐/日报。**修复**：双轨 API。关键路径用 `safeFetchOrThrow/safeSaveOrThrow`，caller 显式区分"真无"vs"fetch 失败"。心得：数据库场景的"默认安全值 fallback"几乎都是错的。
-
-### 23. SwiftData @Model 跨 await 持有可能 detached
-**根因**：`pending` 跨 30s+ await 期间外部操作让 Article detach，写入未定义行为。**修复**：不持有跨 await 的 @Model；commitSummaries 用 id 重 fetch alive Article。心得：@Model 引用安全寿命 = 同一 RunLoop turn。
-
-### 24. `safeSave` 失败被吞 + prefs 仍写 → 永久数据不一致
-**根因**：磁盘 aiSummary 全 nil 但 prefs 显示"已生成 N 条"，Plan A 永久错乱。**修复**：commitSummaries 用 strict save + 失败时回滚内存 + 设 .unavailable + token 记 success=false + 不写 prefs.articleCount。心得：写入失败时所有相关副作用必须一起回滚。
-
-### 25. refresh() 与 forceRegenerate* 互不互斥导致双 commit
-**根因**：双 commit 互相覆盖 + UsageRecord 双扣 token + UI 状态闪烁。**修复**：`refreshTask: Task<Void, Never>?` inflight 复用，所有入口 `await existing.value`。心得：UI flag 仅做进度显示；并发互斥用 inflight Task 字段。
-
-### 26. `withTaskGroup` 不响应 `Task.isCancelled` 取消后仍跑完
-**根因**：用户关菜单后 5 路 task 仍跑完烧 token；下次 refresh 与之并存真实并发翻倍。**修复**：三点 checkpoint（addTask 前 / for await 循环内 cancelAll / runOne 内）+ `.cancelled` 状态独立。心得：Swift Structured Concurrency 取消是协作式，TaskGroup 不自动传播。
-
-### 27. `Dictionary(uniqueKeysWithValues:)` 容灾路径会 fatalError
-**根因**：deduplicateArticles 存在证明历史出现过重复 id，一旦真出现推荐区 crash。**修复**：改 `Dictionary(_, uniquingKeysWith: { first, _ in first })`。心得：主路径强假设 + 容灾路径处理重复 = 漏洞。
-
-### 28. fallback 选错方向：清理类 fallback `Date()` 清空整表
-**根因**：cleanupOlderThan 的 `?? Date()` fallback 让 cutoff 落到现在，删空整表。**修复**：fallback 改 `.distantPast` 或 `guard let`。心得：删除/清理/reset 类 fallback 必须朝"什么都不做"方向，绝不朝"全干掉"方向。
-
-### 29. SwiftUI @Query 不响应系统时钟，跨日午夜不重新 eval
-**根因**：@Query 只对 SwiftData 变更响应，不对时钟变化响应。23:55 打开留着不关，跨零点仍显示昨日数。**修复**：`@State now: Date` + `Timer.publish(60s)` + `onReceive` 仅跨日才 set now。心得：view 自动响应数据变化 ≠ 响应时间变化。
-
-### 30. Swift 5.9 不支持 @MainActor isolated deinit
-**根因**：从 nonisolated deinit 访问 @MainActor isolated 字段编译失败；isolated deinit 是 Swift 6.2+ 特性。测试堆 N 个孤儿 timer。**修复**：暴露 `stop()`；测试 tearDown 显式调用。心得：Swift 5.x 别指望 deinit 兜底外部资源。
-
-### 31. `@unchecked Sendable` mock 的 var 计数器并发数据丢失
-**根因**：read-modify-write 无内存屏障，计数会丢，测试断言间歇性失败/虚假通过。**修复**：mock 配套加 `NSLock + withLock`。心得：`@unchecked Sendable` 是"信任 me 处理同步"的承诺，不是免责声明。
-
-### 32. `Calendar.isDateInToday(date)` 忽略外部时钟参数
-**根因**：`isDateInToday/isDateInYesterday` 内部以系统 `Date()` 锚定，完全忽略 calendar 参数，时钟注入测试失效。**修复**：用 `startOfDay(for:)` + `dateComponents` 手算 days。心得：时钟注入纯函数严禁用任何 `is*Today/Yesterday` 类便捷判定。
-
-### 33. macOS SwiftUI `.buttonStyle(.plain) + .foregroundStyle()` 不生效
-**根因**：plain Button 外层 `.foregroundStyle` 不响应，系统强行用 accentColor。**修复**：策略 A：plain Button → `.foregroundStyle` 移到 label 内 Text；策略 B：系统默认 Button → 用 `.tint()`。心得：Button 外层 modifier 给"按钮外壳"用，不是 label；任何"给按钮文字染色"默认走 label-internal。
-
-### 34. SwiftData @Query 谓词 3 个 `&&` 让 type-checker 超时
-**根因**：SwiftData 谓词 macro 展开 + Swift type-check 复杂度爆炸。**修复**：@Query 谓词只放 1 条件（category），其他过滤（isRead / accepted）放 view 层 `articles.filter`。心得：2 条件 OK 3 条件超时；数据量小时内存 filter 开销忽略。
-
-### 35. macOS `Picker(.segmented)` 按内容宽度无法等分撑满
-**根因**：与 iOS 行为不同，macOS 按需宽度（compact toolbar 设计假设）。**修复**：自定义 HStack 3 Button 等宽 + `unemphasizedSelectedContentBackgroundColor` 模仿 native selected。
-
-### 36. SwiftUI cat-aware view 的 @State 在 cat 切换时被继承
-**根因**：SwiftUI view identity 默认走类型，参数变化不触发重建。**修复**：`.id(selectedTab)` 强制重建子 view + 重置 @State。代价：每次切换重建子 view 树，菜单栏小 view 性能可忽略。
-
-### 37. 启动期 RSS fetch 失败常见 race（DNS / 网络栈未就绪）
-**根因**：AppDelegate 启动期触发 refresh 时 macOS networking 可能未就绪。**修复**：UI 标明数据时态（"⚠ 上次 X 源失败 · 点击重试"）+ 按钮直接重试当前 cat。心得：延迟启动 N 秒影响首屏；正解是标"过去时态" + 一键重试。
-
-### 38. Atom 解析 `entry.links?.first` 可能拿到 rel=self 非文章 URL
-**根因**：Atom 规范允许 `<link rel="self">` 指向 feed 自身、`<link rel="alternate">` 才是文章 HTML 链接。FeedKit 返回顺序无保证，`first` 可能拿到 rel=self URL → UI 打开文章却跳到 RSS 源本身。**修复**：`preferredAtomLink` 静态方法优先选 `rel=alternate + type=text/html`，再 fallback `rel=alternate`，最后 fallback first（兼容缺 rel 的源）。心得：标准里有多个等价语义的字段时，规范的优先级永远不能依赖第三方库的迭代顺序。
-
-### 39. SwiftData ModelContainer 在测试中被 `let (_, context) = TestContainer.make()` 立即 ARC 释放 → context.insert SIGTRAP
-**根因**：`(_, context)` 让 container 在表达式结束后立即被 ARC 释放；mainContext 底层 store 是 container 拥有的，container 释放后 context 调用任何方法（insert/save/fetch）触发 trap，xctest 报 "exited with unexpected signal code 5"，没有 stack trace 也没有断言失败信息。**修复**：`let (container, context) = TestContainer.make(); _ = container`（或挪到 setUp 让 storedProperty 保留）。心得：SwiftData ModelContext 的有效寿命强依赖 ModelContainer 的 strong reference，不像 Core Data 有显式 persistentStoreCoordinator weak/strong 选择。命名绑定别用 `_` 丢掉 container。
-
-### 40. schemaVersion guard 字符串"颗粒度太粗 + 删 store 失败仍推进版本号"导致 v2 内部演进留 NULL 行 → fetch mandatory field 失败
-**根因**：双重缺陷叠加。
-1. `currentSchemaVersion = "v2-multi-category"` 这个字符串只标识"v1→v2 一次大迁移"。v2 phase 1 之后的内部演进期（539da46 → a11a8f5）若干次字段 init 默认值变更（如 `Article.accepted` true→nil）改变了"新建 Article 行的语义"，但**没有触发 schema 物理结构变更**。SwiftData 自动迁移在同 schemaVersion 内能透明加列；问题在旧行新加列的值就是 NULL。新代码 `var category: String`（非可选）拿这个 NULL row 做 fetch 时触发 NSValidateForMandatoryAttribute 校验失败 → 静默或局部崩溃。受害机器：所有跑过 v2 早期版本、再拉到当前 head 的本地环境（21 行残留 Article.category=NULL）。
-2. `performSchemaMigrationIfNeeded` 删 store 文件失败时只 `Log.write` 不 throw → 函数继续走到 `defaults.set(currentSchemaVersion, forKey: "schemaVersion")` → 下次启动 guard 通过 → 旧库残留与新 schemaVersion 共存。同型踩坑 #28（"清理/reset 类操作失败不能让 guard 错误推进"）。
-
-**修复**：
-- bump `currentSchemaVersion` 到 `"v2-multi-category-r2"` 强制所有早期机器再 nuke 一次（quick fix）
-- 抽 `wipeStoreFiles() throws` 独立函数；`performSchemaMigrationIfNeeded() throws` 删 store 失败抛出，caller `makeContainer` 不写 schemaVersion 下次启动重试（防同型再发）
-- 加 `sanityCheckArticles(_:)` 启动期 fetch 1 条 Article，触发 SwiftData mandatory-field 校验；失败走 wipeStoreFiles 兜底重建 + 标 firstLaunchAfterSchemaUpgrade（最后一道防线）
-
-**心得**：
-- SwiftData 自动迁移加列默认 NULL 是"隐性 schema 演进"，开发者觉得只是改了 init default 不会破坏数据，实际 SQLite 行物理层已经分歧。**任何**对 @Model 字段（特别是非可选字段）的改动都应该当作 schema 不兼容变更对待，跟着 bump schemaVersion。
-- "guard 字段 + 副作用操作"组合中，副作用失败必须中断 guard 推进；只 Log 是不够的（log 是观测，不是拦截）。踩坑 #28 已经在 cleanupOlderThan 类场景说过同样的话，这次复现在 schema migration 场景。
-- "ModelContainer 构造成功"≠"数据完整"。SwiftData 是 lazy validation：fetch 时才校验 mandatory 字段。生产代码不能假设构造成功就是数据可用，启动期主动 fetch 一次代价极小、价值显著。
-
-### 41. SwiftUI hover 改子 view 内在尺寸 → MenuBarExtra(.window) popover NSWindow 重算时抛 NSException 必崩
-**根因**：SwiftUI 6.x + `MenuBarExtra(.window)` 的 popover 用 NSHostingView 承载内容，NSHostingView 监听 NSWindow size 变化重算约束。当 popover 内子 view 内在高度变化（典型场景：`.lineLimit(isHovered ? nil : 1)` 让 Text 从 1 行扩成多行）触发链路：
-1. row 内在高度变化 → 父 VStack 内在高度变化 → MenuBarView 总高度变化
-2. SwiftUI 给 NSHostingView 提议新 size → NSHostingView 调 `-[NSView setFrameSize:]` → NSWindow 改 frame
-3. NSWindow `setFrameSize` 回调 KVO observer 链 → `__reusableDependencyContextForKey_block_invoke` → `NSHostingView.didChangeValue(forKey:)` → `invalidateSafeAreaCornerInsets`
-4. invalidate → `ViewGraphRootValueUpdater.invalidateProperties` → `NSHostingView.requestUpdate(after:)` → `NSHostingView.setNeedsUpdate()` → `-[NSView setNeedsUpdateConstraints:]`
-5. `_informContainerThatSubviewsNeedUpdateConstraints` → `-[NSWindow _postWindowNeedsUpdateConstraints]` 在 window layout 周期内**第二次**调用时抛 NSException → `objc_exception_throw` → SIGTRAP
-
-外显：鼠标 hover 推荐项必崩（用户报告"鼠标移动到推荐文章上闪退"，crash log EXC_BREAKPOINT signal SIGTRAP type 5）。
-
-**修复**（grill 4 轮收敛产品决策 G）：
-- 删 `@State isHovered` + `.onHover` + 动态 lineLimit
-- summary 永久 `.lineLimit(2).fixedSize(horizontal: false, vertical: true)` 让 row 高度恒定
-- 同步色条 layout 问题：summary fixedSize 后 inner VStack/HStack 都变 inflexible vertical → outer HStack 把色条 `.frame(maxHeight: .infinity)` 当上限不强制撑满 → row 之间 padding 区透明视觉不连续。改色条为整 row `.overlay(alignment: .leading)` 自动 fill receiver 完整 frame 含 padding 区
-
-**心得**：
-- macOS SwiftUI 内 popover、菜单栏窗口、tooltip 这类"window-anchored" view，**子 view 内在尺寸变化是危险动作**——任何 hover、focus、selection 引起的尺寸变化都可能触发 window 重布局，进而触发系统层的"在 layout 周期内不能再次调 setNeedsUpdate"约束抛异常。同款陷阱在 `.popover()`、`Menu`、`MenuBarExtra` 内都已知。
-- 防御原则：popover 内交互态变化优先用**不改 size 的属性**（颜色、透明度、阴影、border、scale 变换），避免动态 `lineLimit / font / padding / frame`。看全摘要的需求改为 lineLimit 常量值更高 / 独立 tooltip / 独立 popover。
-- SwiftUI Layout 协商隐性陷阱：`.frame(maxHeight: .infinity)` 在某些上下文里只被当作上限不强制撑满（特别是当父级或兄弟 view 通过 fixedSize 变 inflexible 后），需要换 `.overlay { ... }`（自动 fill receiver）或显式给 frame(height:) 才能保证撑满。HStack(alignment: .center) 默认 layout 协商优先用 inflexible child 决定 stack 高度，flexible child 接受 available — 但 SwiftUI 6.x 在 fixedSize 链路上有时不传播完整可用空间给 flexible Shape。
+**#3/#4. `open` 命令静默失败 / 裸二进制图标不显示**：用 `build/AINewsBar.app/Contents/MacOS/AINewsBar &` 直接启动；MenuBarExtra 依赖 bundle 上下文 + `LSUIElement=true`。

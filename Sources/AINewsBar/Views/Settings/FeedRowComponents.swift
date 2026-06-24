@@ -28,10 +28,7 @@ struct FeedRowSkipFilterToggle: View {
     @State private var saveErrorMessage = ""
     @State private var showSaveErrorAlert = false
 
-    /// 仅当该 feed 的 cat 配了 filterPrompt 时才显示（AI cat 没有 filter）
-    init(feed: Feed) {
-        self.feed = feed
-    }
+    // 是否显示由父视图 gating（showSkipFilterToggle: cat 配了 filterPrompt 才渲染）。
 
     var body: some View {
         HStack(spacing: 4) {

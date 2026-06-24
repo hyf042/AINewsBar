@@ -22,6 +22,7 @@ macOS 菜单栏多分类资讯阅读器（v2 起：「资讯助手」 - AI / 财
 | 2026-05-30 | **v2.0.6 发布**：hover 崩溃根治（踩坑 #41）+ 推荐 ↔ 文章列表互斥折叠 + 摘要 2 行常显 |
 | 2026-06-02 | 摘要超 2 行 hover `.help()` tooltip 看全文（系统级独立窗口，不触发 #41） |
 | 2026-06-12 | **Linus 系统性 review 5 项**：C1 API Key Base64 编码防 `strings` 扫描 + 旧版明文自动迁移 / C2 RefreshService 拆三文件消 God-object / H1 SummaryPipeline.Task 删 `.ai` default / H2 抽 `PipelineConcurrency` 消除两 Pipeline 复制粘贴 / H3 抽 `FeedRowComponents` 消除两 FeedRow UI 复制粘贴 |
+| 2026-06-24 | **v2.0.7 发布**：打包 Linus review 5 项（C1–H3）+ 清理 `FeedRowSkipFilterToggle` 冗余 init/误导注释；254 测试持平 |
 
 > 逐轮 review 细节、commit hash、各轮测试数变化见 `git log`，不在此重复。架构决策见下表，踩坑见末段。
 
